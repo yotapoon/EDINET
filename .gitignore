@@ -1,0 +1,18 @@
+# .gitignore
+
+# Environment variables
+# .envファイルは機密情報を含むため、Gitの管理対象外とします
+.env
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# Generated data
+# スクリプトによってダウンロードされるデータはリポジトリに含めません
+data/
+
+# Other directories to ignore
+old/
+check/
+ref/
