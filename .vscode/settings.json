@@ -1,11 +1,17 @@
 {
   "files.exclude": {
-    "**/ref": true
+    "**/ref": true,
+    "**/data/**": true,
+    "**/old/**": true
   },
   "search.exclude": {
-    "**/ref": true
+    "**/ref": true,
+    "**/data/**": true,
+    "**/old/**": true
   },
   "files.watcherExclude": {
-    "**/ref/**": true
+    "**/ref/**": true,
+    "**/data/**": true,
+    "**/old/**": true
   }
 }
