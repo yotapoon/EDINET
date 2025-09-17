@@ -4,5 +4,8 @@
   },
   "search.exclude": {
     "**/ref": true
+  },
+  "files.watcherExclude": {
+    "**/ref/**": true
   }
 }
