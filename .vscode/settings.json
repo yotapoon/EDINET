@@ -2,16 +2,19 @@
   "files.exclude": {
     "**/ref": true,
     "**/data/**": true,
-    "**/old/**": true
+    "**/old/**": true,
+    "**/check/**": true
   },
   "search.exclude": {
     "**/ref": true,
     "**/data/**": true,
-    "**/old/**": true
+    "**/old/**": true,
+    "**/check/**": true
   },
   "files.watcherExclude": {
     "**/ref/**": true,
     "**/data/**": true,
-    "**/old/**": true
+    "**/old/**": true,
+    "**/check/**": true
   }
 }
