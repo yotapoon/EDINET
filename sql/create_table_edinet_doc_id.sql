@@ -4,7 +4,7 @@ DROP TABLE IF EXISTS EDINET.dbo.Submission;
 CREATE TABLE EDINET.dbo.Submission (
   dateFile DATE NOT NULL,
   seqNumber INT NULL,
-  docID CHAR(8) NOT NULL,
+  docID CHAR(8) NOT NULL primary key,
   edinetCode CHAR(6) NULL,
   secCode CHAR(5) NULL,
   JCN CHAR(13) NULL,
@@ -58,3 +58,18 @@ CREATE NONCLUSTERED INDEX IX_Submission_secCode
   --INCLUDE (submitDateTime, docID, periodStart, periodEnd);
 
 --SELECT * FROM EDINET.dbo.Submission
+
+/*
+WITH DuplicatesCTE AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (
+            PARTITION BY docID -- Group rows by the same docID
+            ORDER BY submitDateTime DESC, opeDateTime DESC -- Order by newest submission time within each group
+        ) AS RowNum
+    FROM
+        EDINET.dbo.Submission
+)
+DELETE FROM DuplicatesCTE
+WHERE RowNum > 1; -- Delete all but the first (newest) record in each group
+*/

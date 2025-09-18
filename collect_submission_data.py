@@ -12,15 +12,26 @@ def main():
     """
     指定した期間の提出書類一覧を取得し、データベースに保存するメイン処理。
     """
-    # 取得対象の期間を指定
-    start_date = datetime.date(2024, 1, 1)
-    end_date = datetime.date(2024, 1, 5)
+    # 取得対象の期間を指定 (今日から100日前まで)
+    end_date = datetime.date.today()
+    start_date = end_date - datetime.timedelta(days=100)
+    # 
 
     date_range = pd.date_range(start_date, end_date)
     print(f"Collecting submission lists from {start_date} to {end_date}...")
 
+    # データベースから既存の日付を取得
+    existing_dates = database_manager.get_existing_dates()
+    print(f"Found {len(existing_dates)} existing dates in the database.")
+
     for date in tqdm(date_range, desc="Processing dates"):
         date_str = date.strftime('%Y-%m-%d')
+
+        # 日付がすでに存在する場合はスキップ
+        if date_str in existing_dates:
+            # tqdmの進捗表示を考慮して、何もしないが出力を出す
+            # print(f"Skipping {date_str} as it already exists in the database.")
+            continue
         
         try:
             # 1. APIモジュールを使って書類一覧(JSON)を取得
