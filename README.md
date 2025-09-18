@@ -1,67 +1,122 @@
-# EDINET Data Collector and Parser
+# EDINET データ収集・分析ツール
 
-EDINET API v2 を利用して、提出された書類のメタデータやXBRLファイルを取得し、解析するためのツール群です。
+このプロジェクトは、EDINET APIを利用して金融商品取引法に基づく開示書類の情報を収集し、特定の情報を抽出してデータベースに保存するためのツールです。
 
-## 機能概要
+## 主な機能
 
-このリポジトリは、以下のPythonスクリリプトで構成されています。
+- **提出書類一覧の取得**: 指定した期間の日々の提出書類メタデータをEDINET API v2から取得し、データベースに保存します。
+- **詳細情報の抽出**: 提出書類の中から特定の書類（例：有価証券報告書）を対象とし、書類本体（XBRL）をダウンロードします。
+- **データ整形と保存**: XBRLファイルから「大株主の状況」などの特定の情報を抽出し、整形して専用のデータベーステーブルに格納します。
+
+## ファイル構成
+
+プロジェクトは、機能ごとにファイルが分割されています。
+
+```
+edinet_project/
+├── collect_submission_data.py  # 日々の書類一覧を取得・DB保存するスクリプト
+├── process_documents.py        # 書類詳細を抽出し、情報別にDB保存するスクリプト
+├── edinet_api.py               # EDINET APIとの通信を担当するモジュール
+├── xbrl_parser.py              # XBRLファイルの解析とデータ整形を担当するモジュール
+├── database_manager.py         # データベース接続と操作を担当するモジュール
+├── config.py                   # APIキーやDB接続情報などの設定を管理するモジュール
+├── .env                        # APIキーなどの機密情報を格納するファイル (Git管理外)
+└── README.md                   # このファイル
+```
+
+### 各ファイルの役割
 
 - **`collect_submission_data.py`**
-  - 指定した日付に提出された書類のメタデータ一覧をEDINET APIから取得し、JSONファイルとして保存します。
+  - 指定された期間の提出書類メタデータ一覧をEDINET APIから取得します。
+  - 取得した一覧を `Submission` テーブルに保存します。
+  - 定期的に実行し、日々の提出状況を蓄積することを想定しています。
 
-- **`collect_documents.py`**
-  - `collect_submission_data.py`で取得したメタデータに基づき、提出書類本体（XBRLファイルなどを含むZIPファイル）をダウンロードします。
-  - **(注意: このスクリプトは今後修正が予定されています)**
+- **`process_documents.py`**
+  - `Submission` テーブルから処理対象の書類（例：有価証券報告書）を特定します。
+  - 対象書類のXBRLファイルをダウンロードし、`xbrl_parser.py` を使って情報を抽出します。
+  - 抽出した情報を情報別のテーブル（例：`major_shareholders`）に保存します。
 
-- **`edinet_parser.py`**
-  - ダウンロードしたXBRLファイル（ZIP展開後）を解析し、企業名や証券コードなどの情報を抽出するパーサーを提供します。
+- **`edinet_api.py`**
+  - EDINET APIへのリクエスト（書類一覧取得、書類ダウンロード）を抽象化します。
 
-- **`edinet_utils.py`**
-  - EDINET APIへのリクエスト送信やファイル保存など、各スクリリプトで共通して利用されるユーティリティ関数を提供します。
+- **`xbrl_parser.py`**
+  - `xbrr` ライブラリを利用して、XBRLファイルから特定の情報（例：「大株主の状況」）をDataFrameとして抽出します。
+  - 新しい情報を抽出したい場合は、このファイルに関数を追加します。
 
-## 依存関係
+- **`database_manager.py`**
+  - `SQLAlchemy` を用いてデータベースエンジンを管理します。
+  - 各種DataFrameを対応するテーブルに保存する関数を提供します。
 
-このプロジェクトは以下のライブラリに依存しています。
+- **`config.py`**
+  - `.env` ファイルから設定を読み込み、プロジェクト全体で利用できるように定数として提供します。
 
-- `requests`
-- `lxml`
+- **`.env`**
+  - APIキーやデータベースの接続情報など、外部に公開すべきでない値を記述します。
 
-以下のコマンドでインストールできます。
-```bash
-pip install requests lxml
+## 必要なライブラリ
+
+このプロジェクトを実行するには、以下のライブラリが必要です。
+
 ```
+pandas
+requests
+sqlalchemy
+pyodbc
+python-dotenv
+xbrr
+tqdm
+```
+
+以下のコマンドで一括インストールできます。
+
+```bash
+pip install pandas requests sqlalchemy pyodbc python-dotenv xbrr tqdm
+```
+
+## セットアップ
+
+1.  **リポジトリのクローン**:
+    ```bash
+    git clone <repository_url>
+    cd edinet_project
+    ```
+
+2.  **ODBCドライバのインストール**:
+    使用しているOSに合わせて、SQL Serverに接続するためのODBCドライバをインストールしてください。
+
+3.  **`.env` ファイルの作成**:
+    プロジェクトのルートに `.env` ファイルを作成し、以下のように環境変数を設定します。
+
+    ```.env
+    # .env.example
+
+    # EDINET API v2のサブスクリプションキー
+    EDINET_API_KEY="YOUR_API_KEY"
+
+    # データベース情報
+    SERVER_NAME="your_server_name"
+    DATABASE_NAME="your_database_name"
+    ```
+
+4.  **DSNの設定**:
+    `config.py` 内の `CONNECTION_STRING` でDSN（データソース名）を指定しています。お使いの環境に合わせてODBCデータソースアドミニストレーターで `SQLServerDSN` という名前のDSNを設定するか、`config.py` の接続文字列を直接編集してください。
 
 ## 使い方
 
-### 1. 提出書類メタデータの取得
+処理は2つのステップで行います。
 
-`collect_submission_data.py` を実行して、特定の日付に提出された書類のメタデータを取得します。
+### Step 1: 提出書類一覧の取得
 
-```bash
-python collect_submission_data.py --date YYYY-MM-DD --output_dir path/to/save/metadata
-```
-
-### 2. 提出書類本体のダウンロード
-
-`collect_documents.py` を実行して、メタデータに対応する書類本体（ZIPファイル）をダウンロードします。
+まず、`collect_submission_data.py` を実行して、指定した期間の書類メタデータをデータベースに保存します。スクリプト内の `start_date` と `end_date` を適宜変更してください。
 
 ```bash
-python collect_documents.py --input_dir path/to/save/metadata --output_dir path/to/save/documents
+python collect_submission_data.py
 ```
 
-### 3. XBRLファイルの解析 (利用例)
+### Step 2: 書類詳細情報の抽出
 
-`edinet_parser.py` を利用して、ダウンロード・展開したXBRLファイルから情報を抽出できます。
+次に、`process_documents.py` を実行して、Step 1で保存したデータの中から対象の書類を抽出し、詳細情報を取得します。スクリプト内の `target_date` や `target_form_code` を変更することで、処理対象を絞り込めます。
 
-```python
-from edinet_parser import EdinetParser
-
-# XBRLファイルのパスを指定
-parser = EdinetParser("path/to/your/XBRL/file.xbrl")
-
-company_name = parser.get_company_name()
-sec_code = parser.get_sec_code()
-
-print(f"企業名: {company_name}")
-print(f"証券コード: {sec_code}")
+```bash
+python process_documents.py
 ```
