@@ -29,6 +29,27 @@ def fetch_submission_list(date_str: str) -> dict | None:
         print(f"Error: Request failed for {date_str}: {req_err}")
         return None
 
+def fetch_document(doc_id: str) -> bytes | None:
+    """
+    EDINET API v2から指定されたdocIDの書類をCSV形式で取得する。
+    """
+    url = f"{BASE_URL_V2}/documents/{doc_id}"
+    params = {
+        'type': 5,  # 5: 提出本文書（CSV）及び監査報告書等
+        "Subscription-Key": API_KEY
+    }
+
+    try:
+        res = requests.get(url, params=params, timeout=60)
+        res.raise_for_status()
+        return res.content
+    except requests.exceptions.HTTPError as http_err:
+        print(f"Error: HTTP error occurred while fetching document {doc_id}: {http_err} - {res.text}")
+        return None
+    except requests.exceptions.RequestException as req_err:
+        print(f"Error: Request failed for document {doc_id}: {req_err}")
+        return None
+
 if __name__ == '__main__':
     import datetime
     import json

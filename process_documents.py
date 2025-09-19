@@ -1,54 +1,57 @@
 import datetime
-import time
-from tqdm import tqdm
-
-# これまでに作成したモジュールと、これから作成するパーサーをインポート
 import database_manager
-import edinet_api
-import xbrl_parser
-from config import SUBMISSION_TABLE_NAME
-
+import document_processor
+import pandas as pd
 
 def main():
     """
-    DBに保存された書類一覧から対象を絞り込み、詳細情報を抽出して別テーブルに保存する。
+    メイン処理
     """
-    # --- 処理対象の設定 ---
-    target_date = datetime.date(2024, 1, 4)
-    # 書類形式コード '030000' は「有価証券報告書」
-    target_form_code = '030000'
+    # 処理対象の日付を指定
+    # target_date = (datetime.date.today() - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+    target_date = '2024-05-31' # テスト用に固定
+    print(f"Processing documents for date: {target_date}")
 
-    # 1. DBから処理対象のdocIDリストを取得
-    print(f"Fetching document list for {target_date}...")
-    # (注: get_target_doc_ids関数は後ほどdatabase_manager.pyに追加する必要があります)
-    doc_ids = database_manager.get_target_doc_ids(target_date, target_form_code)
+    # ステップ1: 対象とすべきdocIDをDBから抽出する
+    doc_ids = database_manager.get_doc_ids_by_date(target_date)
+
     if not doc_ids:
-        print(f"No documents found for {target_date} with formCode {target_form_code}.")
+        print("No target documents found for the specified date.")
         return
 
-    print(f"Found {len(doc_ids)} documents to process.")
+    print(f"Found {len(doc_ids)} target documents.")
 
-    # 2. 各書類をループ処理
-    for doc_id in tqdm(doc_ids, desc="Processing Documents"):
-        try:
-            # 3. EDINET APIから書類本体（ZIPファイル）をダウンロード
-            # (注: download_document関数は後ほどedinet_api.pyに追加する必要があります)
-            zip_content = edinet_api.download_document(doc_id)
-            if not zip_content:
-                continue
+    # ステップ2: 各docIDについてドキュメント処理を実行し、結果を収集
+    # 抽出されたデータタイプごとにDataFrameを格納する辞書
+    all_extracted_data = {}
 
-            # 4. XBRLパーサーで「大株主の状況」を抽出
-            major_shareholders_df = xbrl_parser.extract_major_shareholders(zip_content)
+    for doc_id in doc_ids:
+        # process_document_dataは辞書を返す
+        extracted_for_doc = document_processor.process_document_data(doc_id)
+        
+        # 抽出されたデータタイプごとに結果を結合
+        for data_type, df_result in extracted_for_doc.items():
+            if data_type not in all_extracted_data:
+                all_extracted_data[data_type] = []
+            all_extracted_data[data_type].append(df_result)
+    
+    # 収集したデータを最終的なDataFrameに結合して表示
+    if all_extracted_data:
+        print("\n--- Consolidated Processed Data ---")
+        for data_type, list_of_dfs in all_extracted_data.items():
+            final_df_for_type = pd.concat(list_of_dfs, ignore_index=True)
+            print(f"\n--- {data_type} ---")
+            print(final_df_for_type)
+            print("---------------------------------")
+    else:
+        print("No data processed from documents.")
 
-            # 5. 抽出したデータをDBに保存
-            if major_shareholders_df is not None and not major_shareholders_df.empty:
-                # (注: save_major_shareholders関数は後ほどdatabase_manager.pyに追加する必要があります)
-                database_manager.save_major_shareholders(major_shareholders_df, doc_id)
+    # ステップ3: (今後の実装) 取得したデータをDBに保存する
+    # if all_extracted_data:
+    #     for data_type, list_of_dfs in all_extracted_data.items():
+    #         final_df_for_type = pd.concat(list_of_dfs, ignore_index=True)
+    #         database_manager.save_processed_data(data_type, final_df_for_type) # 仮の関数
 
-        except Exception as e:
-            print(f"An error occurred while processing {doc_id}: {e}")
-        finally:
-            time.sleep(1)  # APIへの負荷を考慮
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

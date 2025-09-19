@@ -5,23 +5,26 @@
 ## 主な機能
 
 - **提出書類一覧の取得**: 指定した期間の日々の提出書類メタデータをEDINET API v2から取得し、データベースに保存します。
-- **詳細情報の抽出**: 提出書類の中から特定の書類（例：有価証券報告書）を対象とし、書類本体（XBRL）をダウンロードします。
-- **データ整形と保存**: XBRLファイルから「大株主の状況」などの特定の情報を抽出し、整形して専用のデータベーステーブルに格納します。
+- **詳細情報の抽出**: 提出書類の中から特定の書類（例：有価証券報告書）を対象とし、書類本体（XBRLから変換されたCSV形式）をダウンロードします。
+- **モジュール化されたデータ抽出**: 「大株主の状況」や「株主構成」など、情報タイプごとにモジュール化されたパーサーを用いてデータを抽出し、整形します。
+- **データ整形と保存**: 抽出した情報をデータベースに格納するための準備を行います。
 
 ## ファイル構成
 
 プロジェクトは、機能ごとにファイルが分割されています。
 
 ```
-edinet_project/
-├── collect_submission_data.py  # 日々の書類一覧を取得・DB保存するスクリプト
-├── process_documents.py        # 書類詳細を抽出し、情報別にDB保存するスクリプト
-├── edinet_api.py               # EDINET APIとの通信を担当するモジュール
-├── xbrl_parser.py              # XBRLファイルの解析とデータ整形を担当するモジュール
-├── database_manager.py         # データベース接続と操作を担当するモジュール
-├── config.py                   # APIキーやDB接続情報などの設定を管理するモジュール
-├── .env                        # APIキーなどの機密情報を格納するファイル (Git管理外)
-└── README.md                   # このファイル
+./
+├── collect_submission_data.py        # 日々の書類一覧を取得・DB保存するスクリプト
+├── process_documents.py              # 書類詳細を抽出し、情報別に処理するメインスクリプト
+├── edinet_api.py                     # EDINET APIとの通信を担当するモジュール
+├── database_manager.py               # データベース接続と操作を担当するモジュール
+├── config.py                         # APIキーやDB接続情報などの設定を管理するモジュール
+├── document_processor.py             # 個別書類の読み込みと、登録されたパーサーの呼び出しを管理するモジュール
+├── shareholder_parser.py             # 「大株主の状況」のデータ抽出を担当するモジュール
+├── shareholder_composition_parser.py # 「株主構成」のデータ抽出を担当するモジュール
+├── .env                              # APIキーなどの機密情報を格納するファイル (Git管理外)
+└── README.md                         # このファイル
 ```
 
 ### 各ファイルの役割
@@ -33,15 +36,10 @@ edinet_project/
 
 - **`process_documents.py`**
   - `Submission` テーブルから処理対象の書類（例：有価証券報告書）を特定します。
-  - 対象書類のXBRLファイルをダウンロードし、`xbrl_parser.py` を使って情報を抽出します。
-  - 抽出した情報を情報別のテーブル（例：`major_shareholders`）に保存します。
+  - `document_processor.py` を使って書類の詳細情報を取得・抽出し、結果を表示します。
 
 - **`edinet_api.py`**
   - EDINET APIへのリクエスト（書類一覧取得、書類ダウンロード）を抽象化します。
-
-- **`xbrl_parser.py`**
-  - `xbrr` ライブラリを利用して、XBRLファイルから特定の情報（例：「大株主の状況」）をDataFrameとして抽出します。
-  - 新しい情報を抽出したい場合は、このファイルに関数を追加します。
 
 - **`database_manager.py`**
   - `SQLAlchemy` を用いてデータベースエンジンを管理します。
@@ -49,6 +47,17 @@ edinet_project/
 
 - **`config.py`**
   - `.env` ファイルから設定を読み込み、プロジェクト全体で利用できるように定数として提供します。
+
+- **`document_processor.py`**
+  - 個別の書類ID（`docID`）を受け取り、EDINET APIから書類をダウンロードし、CSV形式で読み込みます。
+  - 登録された複数のパーサー（`shareholder_parser.py`など）を呼び出し、様々な種類のデータを抽出します。
+  - 抽出結果をデータタイプごとの辞書として返します。
+
+- **`shareholder_parser.py`**
+  - 読み込まれたDataFrameから「大株主の状況」に関するデータを抽出・整形します。
+
+- **`shareholder_composition_parser.py`**
+  - 読み込まれたDataFrameから「株主構成」に関するデータを抽出・整形します。
 
 - **`.env`**
   - APIキーやデータベースの接続情報など、外部に公開すべきでない値を記述します。
@@ -63,14 +72,12 @@ requests
 sqlalchemy
 pyodbc
 python-dotenv
-xbrr
-tqdm
 ```
 
 以下のコマンドで一括インストールできます。
 
 ```bash
-pip install pandas requests sqlalchemy pyodbc python-dotenv xbrr tqdm
+pip install pandas requests sqlalchemy pyodbc python-dotenv
 ```
 
 ## セットアップ
@@ -115,8 +122,17 @@ python collect_submission_data.py
 
 ### Step 2: 書類詳細情報の抽出
 
-次に、`process_documents.py` を実行して、Step 1で保存したデータの中から対象の書類を抽出し、詳細情報を取得します。スクリプト内の `target_date` や `target_form_code` を変更することで、処理対象を絞り込めます。
+次に、`process_documents.py` を実行して、Step 1で保存したデータの中から対象の書類を抽出し、詳細情報を取得します。スクリプト内の `target_date` を変更することで、処理対象を絞り込めます。
 
 ```bash
 python process_documents.py
 ```
+
+## 今後の開発予定 (TODO)
+
+-   **データベースへの保存**: 抽出した「大株主の状況」や「株主構成」などのデータを、適切なデータベーステーブルに保存する機能を実装します。
+-   **エラーハンドリングの強化**: API通信、ファイル読み込み、データ抽出におけるエラー処理をより堅牢にします。
+-   **データ検証とクリーンアップ**: 抽出されたデータの妥当性検証（例: 割合が0-100%の範囲内か）や、整形処理を追加します。
+-   **設定の外部化**: ターゲット日付や出力パスなど、より多くの設定項目を`config.py`などの設定ファイルで管理できるようにします。
+-   **ロギング**: `print`文の代わりに、適切なロギング機構を導入し、処理状況やエラーを詳細に記録できるようにします。
+-   **その他のデータ抽出**: 「大量保有報告書」など、他の種類の開示書類や情報からのデータ抽出機能を追加します。

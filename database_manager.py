@@ -1,5 +1,5 @@
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select, table, column
 from config import CONNECTION_STRING, SUBMISSION_TABLE_NAME
 
 # アプリケーション全体で共有するデータベースエンジンを作成
@@ -29,4 +29,36 @@ def get_existing_dates() -> list[str]:
             return []
     except Exception as e:
         print(f"Error: Failed to retrieve existing dates: {e}")
+        return []
+
+def get_doc_ids_by_date(target_date: str) -> list[str]:
+    """
+    指定された日付の有価証券報告書・四半期報告書のdocIDを取得する
+    """
+    # 対象とする書類コード (formCode)
+    # 030000: 有価証券報告書
+    # 043000: 四半期報告書
+    target_form_codes = ['030000', '043000']
+
+    try:
+        with engine.connect() as connection:
+            submission_table = table(
+                SUBMISSION_TABLE_NAME, 
+                column('docID'), 
+                column('dateFile'), 
+                column('formCode')
+            )
+            
+            stmt = select(submission_table.c.docID).where(
+                submission_table.c.dateFile == target_date,
+                submission_table.c.formCode.in_(target_form_codes)
+            )
+            
+            df = pd.read_sql(stmt, connection)
+
+            if not df.empty:
+                return df['docID'].tolist()
+            return []
+    except Exception as e:
+        print(f"Error: Failed to retrieve docIDs for date {target_date}: {e}")
         return []
