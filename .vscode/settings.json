@@ -16,5 +16,6 @@
     "**/data/**": true,
     "**/old/**": true,
     "**/check/**": true
-  }
+  },
+  "terminal.integrated.wordWrap": false
 }

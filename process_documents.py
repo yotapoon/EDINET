@@ -9,7 +9,7 @@ def main():
     """
     # 処理対象の日付を指定
     # target_date = (datetime.date.today() - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
-    target_date = '2024-05-31' # テスト用に固定
+    target_date = '2025-06-30' # テスト用に固定
     print(f"Processing documents for date: {target_date}")
 
     # ステップ1: 対象とすべきdocIDをDBから抽出する
