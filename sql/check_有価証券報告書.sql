@@ -18,6 +18,7 @@ SELECT * FROM EDINET..DocumentFormMaster
 
 select dateFile
 		,seqNumber
+		,SUBMISSION.filerName
 		,docID
 		,edinetCode
 		,secCode
@@ -43,6 +44,10 @@ from edinet..Submission AS SUBMISSION
 		ON DOC.ordinance_code = SUBMISSION.ordinanceCode
 			AND DOC.form_code = SUBMISSION.formCode
 where 1 = 1
+	AND SUBMISSION.filerName LIKE N'%トヨタ自動車%' AND SUBMISSION.formCode = '030000' -- トヨタの有報
+	--AND SUBMISSION.filerName LIKE N'%MS&AD%' AND SUBMISSION.formCode = '030000' -- MS&ADの有報
 	--AND csvFlag = 0 AND xbrlFlag = 1 -- 7件がヒット⇒とりあえず考慮しない
 	--AND csvFlag = 0 AND pdfFlag = 1 -- 約6万件がヒット⇒数は多いがPDFが取れてもどうしようもないため考慮しない
 	--AND docID = 'S100W9YI'
+ORDER BY dateFile DESC
+

@@ -6,6 +6,7 @@ import zipfile
 import shareholder_parser
 import shareholder_composition_parser
 import large_volume_holding_parser
+import specified_investment_parser
 
 # formCode にもとづいて使用するパーサーを定義するレジストリ
 PARSER_REGISTRY = {
@@ -13,6 +14,7 @@ PARSER_REGISTRY = {
     '030000': [
         ("MajorShareholders", shareholder_parser.extract_shareholder_data),
         ("ShareholderComposition", shareholder_composition_parser.extract_shareholder_composition_data),
+        ("SpecifiedInvestment", specified_investment_parser.parse_specified_investment),
     ],
     # 大量保有報告書
     '050210': [
@@ -47,9 +49,9 @@ def fetch_and_save_document(doc_id: str) -> str | None:
         with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
             # 書類内のCSVファイルを探す (XBRL_TO_CSVフォルダ以下にあるものを想定)
             target_csv_name = None
-            print(z.namelist())
+            # print(z.namelist())
             for filename in z.namelist():
-                if filename.endswith('.csv') and "XBRL_TO_CSV" in filename:
+                if filename.startswith("XBRL_TO_CSV/jpcrp") and filename.endswith('.csv'):
                     target_csv_name = filename
                     break
             
@@ -135,6 +137,11 @@ def parse_document_file(csv_path: str, form_code: str) -> dict:
 if __name__ == "__main__":
     # doc_id, form_code = "S100W9ZC", "053000"
     # doc_id, form_code = "S100W9YI", "030000"
-    doc_id, form_code = "S100W9Y3", "030000"
+    # doc_id, form_code = "S100W9Y3", "030000"
+    doc_id, form_code = "S100W0ZR", "030000" # MS&AD
+    # doc_id, form_code = "S100VWVY", "030000" # トヨタ自動車
+    
+    
     csv_path = fetch_and_save_document(doc_id)
-    print(parse_document_file(csv_path, form_code = "030000"))
+    if csv_path:
+        print(parse_document_file(csv_path, form_code = "030000"))
