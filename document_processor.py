@@ -3,18 +3,18 @@ import edinet_api
 import io
 import os
 import zipfile
-import shareholder_parser
-import shareholder_composition_parser
 import large_volume_holding_parser
-import specified_investment_parser
+import parsers
 
 # formCode にもとづいて使用するパーサーを定義するレジストリ
 PARSER_REGISTRY = {
     # 有価証券報告書
     '030000': [
-        ("MajorShareholders", shareholder_parser.extract_shareholder_data),
-        ("ShareholderComposition", shareholder_composition_parser.extract_shareholder_composition_data),
-        ("SpecifiedInvestment", specified_investment_parser.parse_specified_investment),
+        ("MajorShareholders", parsers.extract_shareholder_data),
+        ("ShareholderComposition", parsers.extract_shareholder_composition_data),
+        ("SpecifiedInvestment", parsers.parse_specified_investment),
+        ("Officer", parsers.parse_officer_information),
+        ("VotingRights", parsers.parse_voting_rights),
     ],
     # 大量保有報告書
     '050210': [
