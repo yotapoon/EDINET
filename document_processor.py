@@ -51,7 +51,10 @@ def fetch_and_save_document(doc_id: str) -> str | None:
             target_csv_name = None
             # print(z.namelist())
             for filename in z.namelist():
-                if filename.startswith("XBRL_TO_CSV/jpcrp") and filename.endswith('.csv'):
+                if filename.startswith("XBRL_TO_CSV/jpcrp") and filename.endswith('.csv'): # 企業内容等の開示に関する内閣府令
+                    target_csv_name = filename
+                    break
+                if filename.startswith("XBRL_TO_CSV/jpsps") and filename.endswith('.csv'):# 特定有価証券の内容等の開示に関する内閣府令	
                     target_csv_name = filename
                     break
             
@@ -140,8 +143,11 @@ if __name__ == "__main__":
     # doc_id, form_code = "S100W9Y3", "030000"
     doc_id, form_code = "S100W0ZR", "030000" # MS&AD
     # doc_id, form_code = "S100VWVY", "030000" # トヨタ自動車
+    doc_id, form_code = "S100WKUZ", "010000" #
+    # curl "https://disclosure.edinet-fsa.go.jp/api/v2/documents/S100WKUZ?type=5&Subscription-Key=YOUR_API_KEY" -o S100WKUZ.zip
+
     
     
     csv_path = fetch_and_save_document(doc_id)
     if csv_path:
-        print(parse_document_file(csv_path, form_code = "030000"))
+        print(parse_document_file(csv_path, form_code = form_code))
