@@ -233,6 +233,80 @@ def parse_voting_rights(df: pd.DataFrame) -> pd.DataFrame:
         numeric_cols=['TotalNumberOfIssuedShares', 'NumberOfOtherSharesWithFullVotingRights', 'NumberOfTreasurySharesWithFullVotingRights', 'NumberOfSharesLessThanOneUnit']
     )
 
+# --- 自己株券買付状況報告書パーサー ---
+
+def parse_treasury_stock_acquisition_report(df: pd.DataFrame, ordinance_code: str = "crp") -> pd.DataFrame:
+    """
+    自己株券買付状況報告書（府令コード指定）のデータを解析し、整形されたDataFrameを返す。
+    ordinance_code に基づいて、一般企業(crp)とREIT(sps)の形式に対応する。
+
+    Args:
+        df (pd.DataFrame): XBRLをCSVに変換したデータフレーム。
+        ordinance_code (str, optional): 府令コードの略号 ('crp' or 'sps'). Defaults to "crp".
+
+    Returns:
+        pd.DataFrame: 抽出・整形されたデータを含むDataFrame。
+
+    Raises:
+        ValueError: ordinance_codeが 'crp' または 'sps' でない場合。
+    """
+    if ordinance_code not in ["crp", "sps"]:
+        raise ValueError("ordinance_code must be 'crp' or 'sps'")
+
+    def _get_value(element_id: str) -> str | None:
+        """DataFrameから指定された要素IDの値を取得し、無効な値をNoneに変換する。"""
+        try:
+            value = df.loc[df['要素ID'] == element_id, '値'].iloc[0]
+            if pd.isna(value) or str(value).strip() in ['－', '#N/A', '-']:
+                return None
+            return str(value)
+        except (IndexError, KeyError):
+            return None
+
+    # 府令コードに基づいてプレフィックスを決定
+    sbr_prefix = f"jp{ordinance_code}-sbr_cor"
+
+    # メタデータを抽出
+    metadata = {
+        'SubmissionDate': _get_value(f"{sbr_prefix}:FilingDateCoverPage"),
+        'FiscalPeriodEnd': _get_value('jpdei_cor:CurrentPeriodEndDateDEI'), # この報告書では通常None
+        'SecuritiesCode': _get_value('jpdei_cor:SecurityCodeDEI')
+    }
+    # 証券コードの整形
+    if metadata.get('SecuritiesCode'):
+        match = re.search(r'\d{5}', str(metadata['SecuritiesCode']))
+        if match:
+            metadata['SecuritiesCode'] = match.group(0)
+
+    # 取得状況の要素IDを条件分岐で決定
+    if ordinance_code == 'crp':
+        acquisition_id = f"{sbr_prefix}:AcquisitionsByResolutionOfBoardOfDirectorsMeetingTextBlock"
+    else: # sps
+        acquisition_id = f"{sbr_prefix}:AcquisitionsOfTreasurySharesTextBlock"
+
+    # 主要なデータを抽出
+    report_data = {
+        'Ordinance': _get_value('jpdei_cor:CabinetOfficeOrdinanceDEI'),
+        'FormType': _get_value('jpdei_cor:DocumentTypeDEI'),
+        'AcquisitionStatus': _get_value(acquisition_id),
+        'DisposalStatus': _get_value(f"{sbr_prefix}:DisposalsOfTreasurySharesTextBlock"),
+        'HoldingStatus': _get_value(f"{sbr_prefix}:HoldingOfTreasurySharesTextBlock"),
+    }
+    
+    result_df = pd.DataFrame([report_data])
+
+    ordered_columns = [
+        'SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode',
+        'Ordinance', 'FormType', 'AcquisitionStatus',
+        'DisposalStatus', 'HoldingStatus'
+    ]
+    
+    # _finalize_df を使ってメタデータ結合と整形を行う
+    return _finalize_df(
+        result_df, metadata,
+        ordered_columns=ordered_columns
+    )
+
 # --- 統合テスト ---
 
 if __name__ == "__main__":

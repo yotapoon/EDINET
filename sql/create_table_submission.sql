@@ -4,7 +4,7 @@ DROP TABLE IF EXISTS EDINET.dbo.Submission;
 CREATE TABLE EDINET.dbo.Submission (
   dateFile DATE NOT NULL,
   seqNumber INT NULL,
-  docID CHAR(8) NOT NULL primary key,
+  docID CHAR(8) NOT NULL,
   edinetCode CHAR(6) NULL,
   secCode CHAR(5) NULL,
   JCN CHAR(13) NULL,
@@ -37,6 +37,7 @@ CREATE TABLE EDINET.dbo.Submission (
 );
 
 --ALTER TABLE EDINET.dbo.Submission ADD FlagLoadCsv BIT DEFAULT 0;
+ALTER TABLE EDINET.dbo.Submission ADD CONSTRAINT PK_Submission PRIMARY KEY (dateFile, seqNumber, docID)
 
 
 CREATE NONCLUSTERED INDEX IX_Submission_docID
@@ -57,7 +58,8 @@ CREATE NONCLUSTERED INDEX IX_Submission_secCode
   ON Edinet.dbo.Submission(secCode)
   --INCLUDE (submitDateTime, docID, periodStart, periodEnd);
 
---SELECT * FROM EDINET.dbo.Submission
+--SELECT TOP 100 * FROM EDINET.dbo.Submission ORDER BY DATEFILE DESC
+--SELECT * FROM EDINET.dbo.Submission WHERE docID = 'S100WM4O'
 
 /*
 WITH DuplicatesCTE AS (

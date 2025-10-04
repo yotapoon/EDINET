@@ -26,7 +26,7 @@ PARSER_REGISTRY = {
     ],
 }
 
-def fetch_and_save_document(doc_id: str) -> str | None:
+def fetch_and_save_document(doc_id: str, ordinanceCodeShort: str) -> str | None:
     """
     指定されたdocIDの書類をAPIから取得し、CSVをファイルに保存してそのパスを返す。
     """
@@ -50,14 +50,14 @@ def fetch_and_save_document(doc_id: str) -> str | None:
             # 書類内のCSVファイルを探す (XBRL_TO_CSVフォルダ以下にあるものを想定)
             target_csv_name = None
             # print(z.namelist())
+            num_target = 0
             for filename in z.namelist():
-                if filename.startswith("XBRL_TO_CSV/jpcrp") and filename.endswith('.csv'): # 企業内容等の開示に関する内閣府令
+                if filename.startswith(f"XBRL_TO_CSV/jp{ordinanceCodeShort}") and filename.endswith('.csv'):
                     target_csv_name = filename
-                    break
-                if filename.startswith("XBRL_TO_CSV/jpsps") and filename.endswith('.csv'):# 特定有価証券の内容等の開示に関する内閣府令	
-                    target_csv_name = filename
-                    break
+                    num_target += 1
             
+            if num_target > 1:
+                print(f"Warning: several files found", z.namelist())
             if not target_csv_name:
                 print(f"No CSV file found in XBRL_TO_CSV for docID: {doc_id}")
                 return None
