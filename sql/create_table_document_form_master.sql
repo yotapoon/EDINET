@@ -1,23 +1,22 @@
-
 DROP TABLE IF EXISTS EDINET.dbo.DocumentFormMaster;
 
 CREATE TABLE EDINET.dbo.DocumentFormMaster(
-  ordinance_code VARCHAR(3) NOT NULL,
-  ordinance_name NVARCHAR(255) NULL,
+  ordinanceCode VARCHAR(3) NOT NULL,
+  ordinanceName NVARCHAR(255) NULL,
   ordinanceCodeShort VARCHAR(3) NULL,
-  form_code VARCHAR(6) NOT NULL,
-  form_number NVARCHAR(50),
-  form_name NVARCHAR(255),
+  formCode VARCHAR(6) NOT NULL,
+  formNumber NVARCHAR(50),
+  formName NVARCHAR(255),
   docTypeCode VARCHAR(3),
-  doc_type NVARCHAR(100),
-  disclosure_flag NVARCHAR(10),
+  docType NVARCHAR(100),
+  disclosureFlag NVARCHAR(10),
   remarks NVARCHAR(255) NULL,
-  PRIMARY KEY (ordinance_code, form_code)
-);;
+  PRIMARY KEY (ordinanceCode, formCode)
+);
 
-CREATE INDEX IX_DocumentFormMaster_doc_type ON EDINET.dbo.DocumentFormMaster (doc_type);
+CREATE INDEX IX_DocumentFormMaster_docType ON EDINET.dbo.DocumentFormMaster (docType);
 
-INSERT INTO EDINET.dbo.DocumentFormMaster (ordinance_code, ordinance_name, ordinanceCodeShort, form_code, form_number, form_name, docTypeCode, doc_type, disclosure_flag, remarks) VALUES
+INSERT INTO EDINET.dbo.DocumentFormMaster (ordinanceCode, ordinanceName, ordinanceCodeShort, formCode, formNumber, formName, docTypeCode, docType, disclosureFlag, remarks) VALUES
 ('010',N'企業内容等の開示に関する内閣府令', 'crp','010000', N'第一号様式', N'有価証券通知書', '010', N'有価証券通知書', N'非開示', NULL)
 ,('010',N'企業内容等の開示に関する内閣府令', 'crp','010001', N'第一号様式', N'変更有価証券通知書', '020', N'変更通知書（有価証券通知書）', N'非開示', NULL)
 ,('010',N'企業内容等の開示に関する内閣府令', 'crp','020000', N'第二号様式', N'有価証券届出書（通常方式）', '030', N'有価証券届出書', N'開示', NULL)
@@ -358,7 +357,7 @@ INSERT INTO EDINET.dbo.DocumentFormMaster (ordinance_code, ordinance_name, ordin
 ,('030',N'特定有価証券の内容等の開示に関する内閣府令', 'sps','12E000', N'第十二号の五様式', N'半期報告書（内国有価証券投資事業権利等）', '160', N'半期報告書', N'開示', NULL)
 ,('030',N'特定有価証券の内容等の開示に関する内閣府令', 'sps','12E001', N'第十二号の五様式', N'訂正半期報告書（内国有価証券投資事業権利等）', '170', N'訂正半期報告書', N'開示', NULL)
 ,('030',N'特定有価証券の内容等の開示に関する内閣府令', 'sps','12F000', N'第十二号の六様式', N'半期報告書（外国有価証券投資事業権利等）', '160', N'半期報告書', N'開示', NULL)
-,('030',N'特定有価証券の内容等の開示に関する内閣府令', 'sps','12F001', N'第十二号の六様式', N'訂正半期報告書（外国有価証券投資事業権利等）', '170', N'訂正半期報告書', N'開示', NULL)
+,('030',N'特定有価証券の内容等の開示に関する内閣府令', 'sps','12F001', N'第十二号の六様式', N'訂正半期報告書（外国有価証券投資事業権利等）', N'170', N'訂正半期報告書', N'開示', NULL)
 ,('030',N'特定有価証券の内容等の開示に関する内閣府令', 'sps','150000', N'第十五号様式', N'発行登録書（内国投資証券）', '080', N'発行登録書', N'開示', NULL)
 ,('030',N'特定有価証券の内容等の開示に関する内閣府令', 'sps','152000', N'第十五号の三様式', N'発行登録書（短期投資法人債）', '080', N'発行登録書', N'開示', NULL)
 ,('030',N'特定有価証券の内容等の開示に関する内閣府令', 'sps','15A000', N'第十五号の二様式', N'発行登録書（特定内国資産流動化証券）', '080', N'発行登録書', N'開示', NULL)

@@ -1,4 +1,6 @@
-import datetime
+import itertools
+from operator import itemgetter
+
 import database_manager
 import document_processor
 import pandas as pd
@@ -7,62 +9,65 @@ def main():
     """
     メイン処理
     """
-    # 処理対象の日付を指定
-    # target_date = (datetime.date.today() - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
-    target_date = '2025-06-30' # テスト用に固定
-    print(f"Processing documents for date: {target_date}")
+    # target_form_code = '170000' # 自己株券買付状況報告書
+    target_form_code = '170001' # 自己株券買付状況報告書（訂正）
+    target_form_code = '253000' # 自己株券買付状況報告書（訂正，特定有価証券）
+    print(f"Processing documents for formCode: {target_form_code}")
 
-    # ステップ1: 対象とすべき書類(docID, formCode)をDBから抽出する
-    documents_to_process = database_manager.get_documents_by_date(target_date)
+    # ステップ1: 対象とすべき書類(dateFile, docID, ordinanceCodeShort)をDBから日付順で抽出
+    documents_to_process = database_manager.get_documents_by_form_code(target_form_code)
 
     if not documents_to_process:
-        print("No target documents found for the specified date.")
+        print("No target documents found for the specified formCode.")
         return
 
-    print(f"Found {len(documents_to_process)} target documents.")
+    print(f"Found {len(documents_to_process)} total documents to process.")
 
-    # ステップ2: 各書類について処理を実行し、結果を収集
-    all_extracted_data = {}
+    # ステップ2: 書類を日付ごとにグループ化して処理
+    for date_file, group in itertools.groupby(documents_to_process, key=itemgetter(0)):
+        
+        print(f"\n--- Processing date: {date_file} ---")
+        daily_reports = []
+        docs_on_date = list(group)
+        print(f"Found {len(docs_on_date)} documents for this date.")
 
-    for doc_id, form_code in documents_to_process:
-        print(f"--- Processing docID: {doc_id}, formCode: {form_code} ---")
-        
-        # 1. 書類をダウンロードしてファイルパスを取得
-        csv_path = document_processor.fetch_and_save_document(doc_id)
-        
-        if not csv_path:
-            print(f"Skipping docID {doc_id} due to download/save failure.")
-            continue
+        # ステップ2a: 同じ日付の各書類について処理を実行
+        for _, doc_id, ordinanceCodeShort, seq_number in docs_on_date:
+            print(f"  - Processing docID: {doc_id}")
             
-        # 2. ファイルを解析してデータを抽出
-        extracted_for_doc = document_processor.parse_document_file(csv_path, form_code)
-        
-        # 抽出されたデータタイプごとに結果を結合
-        for data_type, df_result in extracted_for_doc.items():
-            if data_type not in all_extracted_data:
-                all_extracted_data[data_type] = []
-            all_extracted_data[data_type].append(df_result)
-    
-    # 収集したデータを最終的なDataFrameに結合して表示
-    if all_extracted_data:
-        print("\n--- Consolidated Processed Data ---")
-        for data_type, list_of_dfs in all_extracted_data.items():
-            if list_of_dfs:
-                final_df_for_type = pd.concat(list_of_dfs, ignore_index=True)
-                print(f"\n--- {data_type} ---")
-                print(final_df_for_type)
-                print("---------------------------------")
-    else:
-        print("No data processed from documents.")
+            # 1. 書類をダウンロードしてファイルパスを取得
+            csv_path = document_processor.fetch_and_save_document(doc_id, ordinanceCodeShort)
+            
+            if not csv_path:
+                print(f"    Skipping docID {doc_id} due to download/save failure.")
+                continue
+                
+            # 2. ファイルを解析してデータを抽出
+            extracted_for_doc = document_processor.parse_document_file(csv_path, target_form_code, ordinanceCodeShort)
+            
+            # 3. 抽出データに必要な情報を追加してリストに格納
+            if "BuybackStatusReport" in extracted_for_doc and not extracted_for_doc["BuybackStatusReport"].empty:
+                report_df = extracted_for_doc["BuybackStatusReport"]
+                report_df['docID'] = doc_id
+                report_df['seqNumber'] = seq_number # DBから取得した値を使用
+                daily_reports.append(report_df)
 
-    # ステップ3: (今後の実装) 取得したデータをDBに保存する
-    # if all_extracted_data:
-    #     for data_type, list_of_dfs in all_extracted_data.items():
-    #         if list_of_dfs:
-    #             final_df_for_type = pd.concat(list_of_dfs, ignore_index=True)
-    #             database_manager.save_processed_data(data_type, final_df_for_type) # 仮の関数
+        # ステップ2b: 日付ごとの処理結果をDBに保存
+        if daily_reports:
+            final_df_for_date = pd.concat(daily_reports, ignore_index=True)
+            
+            # カラムの順序をSQL定義に合わせる
+            final_df_for_date = final_df_for_date[[
+                'docID', 'dateFile', 'seqNumber', 'secCode', 'ordinanceCode',
+                'formCode', 'acquisitionStatus', 'disposalStatus', 'holdingStatus'
+            ]]
 
+            print(f"  Uploading {len(final_df_for_date)} records for {date_file} to the database.")
+            database_manager.save_buyback_status_report(final_df_for_date)
+        else:
+            print(f"No data extracted for date: {date_file}")
 
+    print("\n--- All processing finished. ---")
 
 if __name__ == "__main__":
     main()

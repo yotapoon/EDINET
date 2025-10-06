@@ -235,7 +235,7 @@ def parse_voting_rights(df: pd.DataFrame) -> pd.DataFrame:
 
 # --- 自己株券買付状況報告書パーサー ---
 
-def parse_treasury_stock_acquisition_report(df: pd.DataFrame, ordinance_code: str = "crp") -> pd.DataFrame:
+def parse_buyback_status_report(df: pd.DataFrame, ordinance_code: str = "crp") -> pd.DataFrame:
     """
     自己株券買付状況報告書（府令コード指定）のデータを解析し、整形されたDataFrameを返す。
     ordinance_code に基づいて、一般企業(crp)とREIT(sps)の形式に対応する。
@@ -268,15 +268,15 @@ def parse_treasury_stock_acquisition_report(df: pd.DataFrame, ordinance_code: st
 
     # メタデータを抽出
     metadata = {
-        'SubmissionDate': _get_value(f"{sbr_prefix}:FilingDateCoverPage"),
-        'FiscalPeriodEnd': _get_value('jpdei_cor:CurrentPeriodEndDateDEI'), # この報告書では通常None
-        'SecuritiesCode': _get_value('jpdei_cor:SecurityCodeDEI')
+        'dateFile': _get_value(f"{sbr_prefix}:FilingDateCoverPage"),
+        # 'FiscalPeriodEnd': _get_value('jpdei_cor:CurrentPeriodEndDateDEI'), # この報告書では通常None
+        'secCode': _get_value('jpdei_cor:SecurityCodeDEI')
     }
     # 証券コードの整形
-    if metadata.get('SecuritiesCode'):
-        match = re.search(r'\d{5}', str(metadata['SecuritiesCode']))
+    if metadata.get('secCode'):
+        match = re.search(r'\d{5}', str(metadata['secCode']))
         if match:
-            metadata['SecuritiesCode'] = match.group(0)
+            metadata['secCode'] = match.group(0)
 
     # 取得状況の要素IDを条件分岐で決定
     if ordinance_code == 'crp':
@@ -286,19 +286,19 @@ def parse_treasury_stock_acquisition_report(df: pd.DataFrame, ordinance_code: st
 
     # 主要なデータを抽出
     report_data = {
-        'Ordinance': _get_value('jpdei_cor:CabinetOfficeOrdinanceDEI'),
-        'FormType': _get_value('jpdei_cor:DocumentTypeDEI'),
-        'AcquisitionStatus': _get_value(acquisition_id),
-        'DisposalStatus': _get_value(f"{sbr_prefix}:DisposalsOfTreasurySharesTextBlock"),
-        'HoldingStatus': _get_value(f"{sbr_prefix}:HoldingOfTreasurySharesTextBlock"),
+        'ordinanceCode': _get_value('jpdei_cor:CabinetOfficeOrdinanceDEI'),
+        'formCode': _get_value('jpdei_cor:DocumentTypeDEI'),
+        'acquisitionStatus': _get_value(acquisition_id),
+        'disposalStatus': _get_value(f"{sbr_prefix}:DisposalsOfTreasurySharesTextBlock"),
+        'holdingStatus': _get_value(f"{sbr_prefix}:HoldingOfTreasurySharesTextBlock"),
     }
     
     result_df = pd.DataFrame([report_data])
 
     ordered_columns = [
-        'SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode',
-        'Ordinance', 'FormType', 'AcquisitionStatus',
-        'DisposalStatus', 'HoldingStatus'
+        'dateFile', 'secCode',
+        'ordinanceCode', 'formCode', 'acquisitionStatus',
+        'disposalStatus', 'holdingStatus'
     ]
     
     # _finalize_df を使ってメタデータ結合と整形を行う

@@ -91,7 +91,7 @@ def _format_submission_data(results: list, date_str: str) -> pd.DataFrame:
             'englishDocFlag': item.get('englishDocFlag', 0),
             'csvFlag': item.get('csvFlag', 0),
             'legalStatus': item.get('legalStatus'),
-            'FlagLoadCsv': 0,
+            'csvLoadFlag': False,
         } for item in results
     ]
     return pd.DataFrame(structured_data)

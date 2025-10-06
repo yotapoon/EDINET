@@ -24,6 +24,18 @@ PARSER_REGISTRY = {
     '050220': [
         ("LargeVolumeHoldingChange", large_volume_holding_parser.extract_large_volume_holding_data), # 同じパーサーを仮に利用
     ],
+    # 自己株券買付状況報告書
+    '170000': [
+        ("BuybackStatusReport", parsers.parse_buyback_status_report)
+    ],
+    # 自己株券買付状況報告書（訂正）
+    '170001': [
+        ("BuybackStatusReport", parsers.parse_buyback_status_report)
+    ],
+    # 自己株券買付状況報告書（訂正，特定有価証券）
+    '253000': [
+        ("BuybackStatusReport", parsers.parse_buyback_status_report)
+    ],
 }
 
 def fetch_and_save_document(doc_id: str, ordinanceCodeShort: str) -> str | None:
@@ -87,7 +99,7 @@ def fetch_and_save_document(doc_id: str, ordinanceCodeShort: str) -> str | None:
         return None
 
 
-def parse_document_file(csv_path: str, form_code: str) -> dict:
+def parse_document_file(csv_path: str, form_code: str, ordinance_code_short: str = None) -> dict:
     """
     指定されたCSVファイルを、form_codeにもとづいて適切なパーサーで解析する。
     """
@@ -96,8 +108,8 @@ def parse_document_file(csv_path: str, form_code: str) -> dict:
         return {}
 
     # form_codeに対応するパーサーを取得
-    parsers = PARSER_REGISTRY.get(form_code)
-    if not parsers:
+    parsers_to_use = PARSER_REGISTRY.get(form_code)
+    if not parsers_to_use:
         # print(f"No parsers registered for formCode: {form_code}. Skipping.")
         return {}
 
@@ -121,10 +133,15 @@ def parse_document_file(csv_path: str, form_code: str) -> dict:
 
     # --- データ抽出処理 ---
     extracted_results = {}
-    for data_type_name, parser_func in parsers:
+    for data_type_name, parser_func in parsers_to_use:
         print(f"Attempting to extract {data_type_name}...")
         try:
-            extracted_data = parser_func(df)
+            # 自己株券買付状況報告書パーサーの場合、追加の引数を渡す
+            if parser_func == parsers.parse_buyback_status_report and ordinance_code_short:
+                extracted_data = parser_func(df, ordinance_code=ordinance_code_short)
+            else:
+                extracted_data = parser_func(df)
+
             if extracted_data is not None and not extracted_data.empty:
                 extracted_results[data_type_name] = extracted_data
                 print(f"Successfully extracted {len(extracted_data)} records for {data_type_name}.")
@@ -142,12 +159,15 @@ if __name__ == "__main__":
     # doc_id, form_code = "S100W9YI", "030000"
     # doc_id, form_code = "S100W9Y3", "030000"
     doc_id, form_code = "S100W0ZR", "030000" # MS&AD
+
     # doc_id, form_code = "S100VWVY", "030000" # トヨタ自動車
     doc_id, form_code = "S100WKUZ", "010000" #
+    doc_id, form_code, ordinanceCodeShort = "S100WPGX", "170000", "crp" # 網屋の自己株
     # curl "https://disclosure.edinet-fsa.go.jp/api/v2/documents/S100WKUZ?type=5&Subscription-Key=YOUR_API_KEY" -o S100WKUZ.zip
 
     
     
-    csv_path = fetch_and_save_document(doc_id)
+    csv_path = fetch_and_save_document(doc_id, ordinanceCodeShort)
     if csv_path:
-        print(parse_document_file(csv_path, form_code = form_code))
+        print(parse_document_file(csv_path, form_code = form_code)["BuybackStatusReport"])
+        parse_document_file(csv_path, form_code = form_code)["BuybackStatusReport"].to_clipboard()
