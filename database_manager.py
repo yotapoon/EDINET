@@ -1,9 +1,15 @@
+import re
 import pandas as pd
 from sqlalchemy import create_engine, select, table, column, desc
 from config import CONNECTION_STRING, SUBMISSION_TABLE_NAME
 
 # アプリケーション全体で共有するデータベースエンジンを作成
 engine = create_engine(CONNECTION_STRING)
+
+# データタイプ名をテーブル名にマッピングする。異なる場合のみ定義。
+TABLE_NAME_MAP = {
+    "Officer": "OfficerInformation"
+}
 
 def save_submission_list(df: pd.DataFrame, date_str: str):
     """提出書類一覧のDataFrameをDBに保存する"""
@@ -126,18 +132,47 @@ def get_documents_by_form_code(target_form_code: str) -> list[tuple[str, str, st
         print(f"Error: Failed to retrieve documents for formCode {target_form_code}: {e}")
         return []
 
-def save_buyback_status_report(df: pd.DataFrame):
-    """自己株券買付状況報告書のDataFrameをDBに保存する"""
+def save_data(df: pd.DataFrame, data_type_name: str):
+    """共通のデータ保存ロジック"""
+    table_name = TABLE_NAME_MAP.get(data_type_name, data_type_name)
+
     if df.empty:
-        print("Info: No new records to upload for BuybackStatusReport.")
+        print(f"Info: No new records to upload for {table_name}.")
         return
 
     try:
-        # テーブル名は大文字小文字を区別する可能性があるため、SQLで定義した通りに指定
-        df.to_sql("BuybackStatusReport", con=engine, if_exists='append', index=False)
-        print(f"Success: Uploaded {len(df)} records to BuybackStatusReport.")
+        # docIDとdateFile/SubmissionDateの組み合わせで既存レコードを削除
+        # docIDは必ず存在すると仮定
+        # 日付カラムは 'dateFile' or 'SubmissionDate' or 'ReportObligationDate'
+        date_col = None
+        if 'dateFile' in df.columns:
+            date_col = 'dateFile'
+        elif 'SubmissionDate' in df.columns:
+            date_col = 'SubmissionDate'
+        elif 'ReportObligationDate' in df.columns:
+            date_col = 'ReportObligationDate'
+
+        # docIDと日付で既存データを削除し、冪等性を担保
+        if 'docID' in df.columns and date_col:
+            unique_docs = df[['docID', date_col]].drop_duplicates()
+            with engine.begin() as connection: # トランザクションを開始
+                for _, row in unique_docs.iterrows():
+                    doc_id = row['docID']
+                    date_val = row[date_col]
+                    # SQLインジェクション対策のため、テーブル名とカラム名は安全なもののみを許可
+                    if not re.match(r'^[a-zA-Z0-9_]+$', table_name) or not re.match(r'^[a-zA-Z0-9_]+$', date_col):
+                         raise ValueError("Invalid table or column name.")
+                    
+                    # テーブル名とカラム名を安全にクエリに組み込む
+                    delete_stmt = f'DELETE FROM "{table_name}" WHERE "docID" = ? AND "{date_col}" = ?'
+                    connection.execute(delete_stmt, (doc_id, date_val))
+
+        df.to_sql(table_name, con=engine, if_exists='append', index=False)
+        print(f"Success: Uploaded {len(df)} records to {table_name}.")
+    except ValueError as ve:
+        print(f"Error during DB upload to {table_name}: {ve}")
     except Exception as e:
-        print(f"Error: An unexpected error occurred during DB upload to BuybackStatusReport: {e}")
+        print(f"Error: An unexpected error occurred during DB upload to {table_name}: {e}")
 
 
 if __name__ == "__main__":

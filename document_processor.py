@@ -3,40 +3,61 @@ import edinet_api
 import io
 import os
 import zipfile
-import large_volume_holding_parser
 import parsers
 
-# formCode にもとづいて使用するパーサーを定義するレジストリ
-PARSER_REGISTRY = {
-    # 有価証券報告書
-    '030000': [
-        ("MajorShareholders", parsers.extract_shareholder_data),
-        ("ShareholderComposition", parsers.extract_shareholder_composition_data),
-        ("SpecifiedInvestment", parsers.parse_specified_investment),
-        ("Officer", parsers.parse_officer_information),
-        ("VotingRights", parsers.parse_voting_rights),
-    ],
-    # 大量保有報告書
-    '050210': [
-        ("LargeVolumeHolding", large_volume_holding_parser.extract_large_volume_holding_data),
-    ],
-    # 変更報告書
-    '050220': [
-        ("LargeVolumeHoldingChange", large_volume_holding_parser.extract_large_volume_holding_data), # 同じパーサーを仮に利用
-    ],
-    # 自己株券買付状況報告書
-    '170000': [
-        ("BuybackStatusReport", parsers.parse_buyback_status_report)
-    ],
-    # 自己株券買付状況報告書（訂正）
-    '170001': [
-        ("BuybackStatusReport", parsers.parse_buyback_status_report)
-    ],
-    # 自己株券買付状況報告書（訂正，特定有価証券）
-    '253000': [
-        ("BuybackStatusReport", parsers.parse_buyback_status_report)
-    ],
-}
+# --- パーサー定義の共通化 ---
+# 有価証券報告書およびその訂正報告書用のパーサー
+SECURITIES_REPORT_PARSERS = [
+    ("MajorShareholders", parsers.extract_shareholder_data),
+    ("ShareholderComposition", parsers.extract_shareholder_composition_data),
+    ("SpecifiedInvestment", parsers.parse_specified_investment),
+    ("Officer", parsers.parse_officer_information),
+    ("VotingRights", parsers.parse_voting_rights),
+]
+
+# 自己株券買付状況報告書およびその訂正報告書用のパーサー
+BUYBACK_STATUS_REPORT_PARSERS = [
+    ("BuybackStatusReport", parsers.parse_buyback_status_report)
+]
+
+# 大量保有報告書およびその変更報告書用のパーサー
+LARGE_VOLUME_HOLDING_PARSERS = [
+    ("LargeVolumeHolding", parsers.extract_large_volume_holding_data),
+]
+
+# --- 書類コード(formCode)のグループ化 ---
+# 有価証券報告書グループ
+SECURITIES_REPORT_FORM_CODES = [
+    '030000',  # 有価証券報告書
+    '043000',  # 訂正有価証券報告書
+]
+
+# 自己株券買付状況報告書グループ
+BUYBACK_STATUS_REPORT_FORM_CODES = [
+    '170000',  # 自己株券買付状況報告書
+    '170001',  # 自己株券買付状況報告書（訂正）
+    '253000',  # 自己株券買付状況報告書（訂正，特定有価証券）
+]
+
+# 大量保有報告書グループ
+LARGE_VOLUME_HOLDING_FORM_CODES = [
+    '050210',  # 大量保有報告書
+    '050220',  # 変更報告書
+]
+
+# --- PARSER_REGISTRYの動的構築 ---
+PARSER_REGISTRY = {}
+
+# 各グループのパーサーを登録
+for code in SECURITIES_REPORT_FORM_CODES:
+    PARSER_REGISTRY[code] = SECURITIES_REPORT_PARSERS
+
+for code in BUYBACK_STATUS_REPORT_FORM_CODES:
+    PARSER_REGISTRY[code] = BUYBACK_STATUS_REPORT_PARSERS
+
+for code in LARGE_VOLUME_HOLDING_FORM_CODES:
+    PARSER_REGISTRY[code] = LARGE_VOLUME_HOLDING_PARSERS
+
 
 def fetch_and_save_document(doc_id: str, ordinanceCodeShort: str) -> str | None:
     """
