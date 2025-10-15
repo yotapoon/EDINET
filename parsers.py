@@ -52,103 +52,160 @@ def _finalize_df(df: pd.DataFrame, metadata: dict, ordered_columns: list, numeri
 
 # --- 大量保有報告書パーサー ---
 
-def _extract_lvh_metadata(df: pd.DataFrame) -> dict:
-    """大量保有報告書のCSVから基本的なメタデータを抽出する"""
-    meta_map = {
-        'jplvh_cor:FilingDateCoverPage': 'SubmissionDate',
-        'jplvh_cor:NameOfIssuer': 'IssuerName',
-        'jplvh_cor:SecurityCodeOfIssuer': 'IssuerSecuritiesCode',
-        'jplvh_cor:DateWhenFilingRequirementAroseCoverPage': 'ReportObligationDate'
+def parse_large_shareholding_report(df: pd.DataFrame, doc_id: str) -> pd.DataFrame:
+    """
+    大量保有報告書のDataFrameから、提出者および各保有者の詳細情報を抽出・整形してDataFrameとして返す。
+    キーは docId と member とする。
+    """
+    # --- データ定義 ---
+    # 提出者属性 (ドキュメントレベル)
+    SUBMITTER_MAP = {
+        'submitterName': 'jplvh_cor:NameCoverPage',
+        'submitterEdinetCode': 'jpdei_cor:EDINETCodeDEI',
+        'submitterSecurityCode': 'jpdei_cor:SecurityCodeDEI',
+        'submitterLvhSecurityCode': 'jplvh_cor:SecurityCodeDEI',
+        'dateFile': 'jplvh_cor:FilingDateCoverPage',
+        'obligationDate': 'jplvh_cor:DateWhenFilingRequirementAroseCoverPage',
+        'isAmendment': 'jpdei_cor:AmendmentFlagDEI',
+        'submissionCount': 'jpdei_cor:NumberOfSubmissionDEI',
     }
-    metadata = {}
-    for old_name, new_name in meta_map.items():
-        series = df.loc[df['要素ID'] == old_name, '値']
-        metadata[new_name] = series.iloc[0] if not series.empty else None
-    
-    if metadata.get('IssuerSecuritiesCode'):
-        match = re.search(r'\d{4,5}', str(metadata['IssuerSecuritiesCode']))
+    # 発行者属性 (ドキュメントレベル)
+    ISSUER_MAP = {
+        'issuerSecurityCode': 'jplvh_cor:SecurityCodeOfIssuer',
+        'issuerName': 'jplvh_cor:NameOfIssuer',
+    }
+    # 保有者情報 (メンバーレベル)
+    HOLDER_MAP = {
+        'holderEdinetCode': 'jplvh_cor:EDINETCodeDEI',
+        'holderName': 'jplvh_cor:Name',
+        'holderNameJp': 'jplvh_cor:FilerNameInJapaneseDEI',
+        'holderNameEn': 'jplvh_cor:FilerNameInEnglishDEI',
+        'holderAddress': 'jplvh_cor:ResidentialAddressOrAddressOfRegisteredHeadquarter',
+        'establishmentDate': 'jplvh_cor:DateOfEstablishment',
+        'businessDescription': 'jplvh_cor:DescriptionOfBusiness',
+        'contactPerson': 'jplvh_cor:ContactInformationAndPerson',
+        'phoneNumber': 'jplvh_cor:TelephoneNumber',
+        'formerName': 'jplvh_cor:FormerName',
+        'formerAddress': 'jplvh_cor:FormerResidentialAddressOrAddressOfRegisteredHeadquarter',
+        'representativeName': 'jplvh_cor:NameOfRepresentative',
+        'representativeTitle': 'jplvh_cor:JobTitleOfRepresentative',
+        'birthDate': 'jplvh_cor:DateOfBirth',
+        'occupation': 'jplvh_cor:Occupation',
+        'employerName': 'jplvh_cor:NameOfEmployer',
+        'employerAddress': 'jplvh_cor:AddressOfEmployer',
+        'hasImportantProposal': 'jplvh_cor:ActOfMakingImportantProposalEtc',
+        'noImportantProposal': 'jplvh_cor:ActOfMakingImportantProposalEtcNA',
+        'holdingPurpose': 'jplvh_cor:PurposeOfHolding',
+        'baseDate': 'jplvh_cor:BaseDate',
+        'totalOutstandingShares': 'jplvh_cor:TotalNumberOfOutstandingStocksEtc',
+        'totalSharesHeld': 'jplvh_cor:TotalNumberOfStocksEtcHeld',
+        'holdingRatio': 'jplvh_cor:HoldingRatioOfShareCertificatesEtc',
+        'previousHoldingRatio': 'jplvh_cor:HoldingRatioOfShareCertificatesEtcPerLastReport',
+        'ownFunds': 'jplvh_cor:AmountOfOwnFund',
+        'totalBorrowings': 'jplvh_cor:TotalAmountOfBorrowings',
+        'otherFunds': 'jplvh_cor:TotalAmountFromOtherSources',
+        'totalAcquisitionFunds': 'jplvh_cor:TotalAmountOfFundingForAcquisition',
+    }
+
+    # --- ヘルパー関数 ---
+    def get_member_id(context_id: str) -> int | None:
+        """コンテキストIDから 'member' の番号を抽出する"""
+        if not isinstance(context_id, str):
+            return None
+        # FilerLargeVolumeHolder1Member -> 1
+        # _E40896-000JointHolder1Member -> 1
+        match = re.search(r'(?:FilerLargeVolumeHolder|JointHolder)(\d+)Member', context_id)
         if match:
-            metadata['IssuerSecuritiesCode'] = match.group(0)
-            
-    return metadata
-
-def _finalize_lvh_df(df: pd.DataFrame, metadata: dict, ordered_columns: list, numeric_cols: list = [], date_cols: list = []) -> pd.DataFrame:
-    """メタデータの付与、データ型変換、カラム順序の整理を行う共通関数"""
-    if df.empty:
-        return pd.DataFrame(columns=ordered_columns)
-
-    for key, value in metadata.items():
-        df[key] = value
-
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = df[col].replace(['－', '-'], np.nan)
-            df[col] = df[col].astype(str).str.replace(',', '', regex=False)
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    for col in date_cols:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
-
-    for col in ordered_columns:
-        if col not in df.columns:
-            df[col] = None
-    
-    return df[ordered_columns]
-
-def extract_large_volume_holding_data(df: pd.DataFrame) -> pd.DataFrame | None:
-    """
-    大量保有報告書のDataFrameから提出者ごとの情報を抽出・整形して返す。
-    """
-    metadata = _extract_lvh_metadata(df)
-
-    member_contexts = df[df['コンテキストID'].astype(str).str.contains("LargeVolumeHolder.Member")]["コンテキストID"].unique()
-
-    if len(member_contexts) == 0:
+            return int(match.group(1))
         return None
 
-    filer_data_list = []
-    for context in member_contexts:
-        ctx_df = df[df['コンテキストID'] == context]
-        if ctx_df.empty:
-            continue
-
-        item_map = {
-            'FilerName': 'jplvh_cor:Name',
-            'FilerAddress': 'jplvh_cor:ResidentialAddressOrAddressOfRegisteredHeadquarter',
-            'IndividualOrCorporation': 'jplvh_cor:IndividualOrCorporation',
-            'Occupation': 'jplvh_cor:Occupation',
-            'HoldingPurpose': 'jplvh_cor:PurposeOfHolding',
-            'NumberOfSharesHeld': 'jplvh_cor:TotalNumberOfStocksEtcHeld',
-            'TotalNumberOfIssuedShares': 'jplvh_cor:TotalNumberOfOutstandingStocksEtc',
-            'HoldingRatio': 'jplvh_cor:HoldingRatioOfShareCertificatesEtc',
-            'PreviousHoldingRatio': 'jplvh_cor:HoldingRatioOfShareCertificatesEtcPerLastReport',
-        }
-
-        filer_data = {}
-        for item_name, element_id in item_map.items():
-            series = ctx_df.loc[ctx_df['要素ID'] == element_id, '値']
-            filer_data[item_name] = series.iloc[0] if not series.empty else None
+    def get_value(element_id: str, context_id: str | None = None) -> str | None:
+        """指定された要素IDとコンテキストIDに一致する値を取得する"""
+        filtered_df = df[df['要素ID'] == element_id]
+        if context_id:
+            filtered_df = filtered_df[filtered_df['コンテキストID'] == context_id]
         
-        filer_data_list.append(filer_data)
-
-    if not filer_data_list:
+        if not filtered_df.empty:
+            value = filtered_df['値'].iloc[0]
+            return value if pd.notna(value) and str(value).strip() not in ['－', '-'] else None
         return None
 
-    result_df = pd.DataFrame(filer_data_list)
+    # --- メイン処理 ---
+    
+    # 1. ドキュメントレベルの情報を抽出
+    doc_level_data = {}
+    all_doc_maps = {**SUBMITTER_MAP, **ISSUER_MAP}
+    for key, element_id in all_doc_maps.items():
+        # ドキュメントレベルの情報はコンテキストを一意に特定しづらいため、最初に見つかった値を取得
+        series = df.loc[df['要素ID'] == element_id, '値']
+        doc_level_data[key] = series.iloc[0] if not series.empty else None
 
-    return _finalize_lvh_df(
-        result_df,
-        metadata,
-        ordered_columns=[
-            'SubmissionDate', 'ReportObligationDate', 'IssuerName', 'IssuerSecuritiesCode',
-            'FilerName', 'FilerAddress', 'IndividualOrCorporation', 'Occupation',
-            'HoldingRatio', 'PreviousHoldingRatio', 'NumberOfSharesHeld', 'TotalNumberOfIssuedShares',
-            'HoldingPurpose'
-        ],
-        numeric_cols=['HoldingRatio', 'PreviousHoldingRatio', 'NumberOfSharesHeld', 'TotalNumberOfIssuedShares'],
-        date_cols=['SubmissionDate', 'ReportObligationDate']
-    )
+    # 2. member IDを各行に付与
+    df['member'] = df['コンテキストID'].apply(get_member_id)
+    
+    # 3. memberごとの情報を抽出
+    all_members_data = []
+    # member IDを持つ行のみを対象
+    member_df = df.dropna(subset=['member']).copy()
+    member_df['member'] = member_df['member'].astype(int)
+    
+    unique_members = member_df['member'].unique()
+
+    for member_id in unique_members:
+        member_data = {'docId': doc_id, 'member': member_id}
+        
+        # このmemberに関連するコンテキストIDのリストを取得
+        member_contexts = member_df[member_df['member'] == member_id]['コンテキストID'].unique()
+        
+        for key, element_id in HOLDER_MAP.items():
+            # 複数のコンテキストがありうるため、最初に見つかった有効な値を取得
+            value = None
+            for ctx_id in member_contexts:
+                val = get_value(element_id, ctx_id)
+                if val is not None:
+                    value = val
+                    break
+            member_data[key] = value
+            
+        all_members_data.append(member_data)
+
+    if not all_members_data:
+        return pd.DataFrame()
+
+    final_df = pd.DataFrame(all_members_data)
+
+    # ドキュメントレベルの情報を各行に結合
+    for key, value in doc_level_data.items():
+        final_df[key] = value
+
+    # hasImportantProposalとnoImportantProposalをマージして新しいカラムを作成
+    if 'hasImportantProposal' in final_df.columns and 'noImportantProposal' in final_df.columns:
+        final_df['importantProposal'] = final_df['hasImportantProposal'].fillna(final_df['noImportantProposal'])
+    elif 'hasImportantProposal' in final_df.columns:
+        final_df['importantProposal'] = final_df['hasImportantProposal']
+    elif 'noImportantProposal' in final_df.columns:
+        final_df['importantProposal'] = final_df['noImportantProposal']
+    else:
+        final_df['importantProposal'] = None
+        
+    # ユーザー指定のカラムリスト (キャメルケース)
+    ordered_columns = [
+        'docId', 'member', 'submitterName', 'submitterEdinetCode',
+        'dateFile', 'obligationDate', 'isAmendment', 'submissionCount',
+        'issuerSecurityCode', 'issuerName', 'holderEdinetCode', 'holderName',
+        'holdingPurpose', 'importantProposal', 'baseDate', 'totalOutstandingShares',
+        'totalSharesHeld', 'holdingRatio', 'previousHoldingRatio',
+        'ownFunds', 'totalBorrowings', 'otherFunds', 'totalAcquisitionFunds'
+    ]
+
+    # 存在しないカラムをNoneで追加
+    for col in ordered_columns:
+        if col not in final_df.columns:
+            final_df[col] = None
+            
+    # 指定されたカラムのみを正しい順序で返す
+    return final_df[ordered_columns]
+
 
 # --- 大株主パーサー ---
 

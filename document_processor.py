@@ -22,7 +22,7 @@ BUYBACK_STATUS_REPORT_PARSERS = [
 
 # 大量保有報告書およびその変更報告書用のパーサー
 LARGE_VOLUME_HOLDING_PARSERS = [
-    ("LargeVolumeHolding", parsers.extract_large_volume_holding_data),
+    ("LargeVolumeHoldingReport", parsers.parse_large_shareholding_report),
 ]
 
 # --- 書類コード(formCode)のグループ化 ---
@@ -157,9 +157,17 @@ def parse_document_file(csv_path: str, form_code: str, ordinance_code_short: str
     for data_type_name, parser_func in parsers_to_use:
         print(f"Attempting to extract {data_type_name}...")
         try:
-            # 自己株券買付状況報告書パーサーの場合、追加の引数を渡す
+            # パーサーごとに追加の引数を渡す
             if parser_func == parsers.parse_buyback_status_report and ordinance_code_short:
                 extracted_data = parser_func(df, ordinance_code=ordinance_code_short)
+            elif parser_func == parsers.parse_large_shareholding_report:
+                # csv_pathからdoc_idを抽出 (e.g., "data\\S100XXXX\\file.csv")
+                try:
+                    doc_id = os.path.normpath(csv_path).split(os.sep)[1]
+                    extracted_data = parser_func(df, doc_id=doc_id)
+                except IndexError:
+                    print(f"Could not extract doc_id from path: {csv_path}")
+                    continue
             else:
                 extracted_data = parser_func(df)
 
