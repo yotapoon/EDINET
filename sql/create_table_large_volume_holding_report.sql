@@ -2,6 +2,7 @@ DROP TABLE IF EXISTS EDINET.dbo.LargeVolumeHoldingReport;
 
 CREATE TABLE EDINET.dbo.LargeVolumeHoldingReport(
     docId CHAR(8) NOT NULL,
+    seqNumber INT,
     member INT NOT NULL,
     submitterName NVARCHAR(MAX),
     submitterEdinetCode CHAR(6),

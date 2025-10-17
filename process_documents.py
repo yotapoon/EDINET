@@ -1,80 +1,115 @@
-import itertools
-from operator import itemgetter
-
 import database_manager
 import document_processor
 import pandas as pd
+import os
+import shutil
 
-def process_documents_by_form_code(target_form_code):
+from definitions import DOCUMENT_TYPE_DEFINITIONS, DATA_PRODUCT_DEFINITIONS
+
+
+def process_documents(target_data_products: list[str]):
     """
-    指定された書類コードのドキュメントを処理します。
+    指定されたデータプロダクトに基づいてドキュメントを処理します。
+    ダウンロードはドキュメントごとに1回のみ実行されます。
     """
-    print(f"Processing documents for formCode: {target_form_code}")
+    print(f"Processing documents for data products: {', '.join(target_data_products)}")
 
-    # ステップ1: 対象とすべき書類(dateFile, docID, ordinanceCodeShort)をDBから日付順で抽出
-    documents_to_process = database_manager.get_documents_by_form_code(target_form_code)
+    # ステップ1: 必要な「書類種別」を特定
+    required_doc_types = set()
+    for product in target_data_products:
+        doc_type = DATA_PRODUCT_DEFINITIONS.get(product)
+        if doc_type:
+            required_doc_types.add(doc_type)
+        else:
+            print(f"Warning: Data product '{product}' is not defined. Skipping.")
 
-    if not documents_to_process:
-        print(f"No target documents found for the specified formCode.")
+    if not required_doc_types:
+        print("No valid data products specified. Nothing to process.")
         return
 
-    print(f"Found {len(documents_to_process)} total documents to process.")
+    # ステップ2: 必要な(form_code, ordinance_code)タプルのセットを作成
+    codes_to_fetch = set()
+    for doc_type in required_doc_types:
+        codes = DOCUMENT_TYPE_DEFINITIONS.get(doc_type)
+        if codes:
+            codes_to_fetch.update(codes)
 
-    # ステップ2: 書類を日付ごとにグループ化して処理
-    for date_file, group in itertools.groupby(documents_to_process, key=itemgetter(0)):
+    if not codes_to_fetch:
+        print("Could not find any document codes for the specified data products.")
+        return
+
+    # ステップ3: 対象となるすべてのユニークな書類をDBから取得 (ここで重複ダウンロードが防止される)
+    documents_to_process = database_manager.get_documents_by_codes(list(codes_to_fetch))
+
+    if not documents_to_process:
+        print(f"No target documents found for the specified data products.")
+        return
+
+    # ステップ4: 各書類について処理を実行
+    for date_file, doc_id, form_code, ordinance_code, ordinance_code_short, seq_number in documents_to_process:
+        print(f"\n--- Processing docID: {doc_id} (Date: {date_file}, Form: {form_code}, Ordinance: {ordinance_code}) ---")
         
-        print(f"\n--- Processing date: {date_file} ---")
-        docs_on_date = list(group)
-        print(f"Found {len(docs_on_date)} documents for this date.")
-
-        # ステップ2a: 同じ日付の各書類について処理を実行
-        for _, doc_id, ordinanceCodeShort, seq_number in docs_on_date:
-            print(f"  - Processing docID: {doc_id}")
-            
-            # 1. 書類をダウンロードしてファイルパスを取得
-            csv_path = document_processor.fetch_and_save_document(doc_id, ordinanceCodeShort)
+        csv_path = None # クリーンアップ処理のためにスコープを広げる
+        try:
+            # 4a. 書類をダウンロードしてファイルパスを取得
+            csv_path = document_processor.fetch_and_save_document(doc_id, ordinance_code_short)
             
             if not csv_path:
                 print(f"    Skipping docID {doc_id} due to download/save failure.")
                 continue
                 
-            # 2. ファイルを解析して複数のデータタイプを抽出
-            extracted_data_map = document_processor.parse_document_file(csv_path, target_form_code, ordinanceCodeShort)
+            # 4b. ファイルを解析して複数のデータタイプを抽出
+            extracted_data_map = document_processor.parse_document_file(
+                csv_path, 
+                form_code=form_code, 
+                ordinance_code=ordinance_code, 
+                ordinance_code_short=ordinance_code_short
+            )
             
-            # 3. 抽出された各データタイプをDBに保存
             if not extracted_data_map:
                 print(f"    No data extracted for docID: {doc_id}")
                 continue
 
-            for data_type_name, df in extracted_data_map.items():
-                if df.empty:
-                    continue
+            # 4c. 抽出されたデータのうち、要求されたプロダクトのみをDBに保存
+            for product_name, df in extracted_data_map.items():
+                if product_name in target_data_products:
+                    if df.empty:
+                        continue
 
-                # 共通のメタデータをDataFrameに追加
-                df['docID'] = doc_id
-                if 'seqNumber' not in df.columns:
-                    df['seqNumber'] = seq_number
-                if 'dateFile' not in df.columns:
-                    df['dateFile'] = date_file
+                    # 共通のメタデータをDataFrameに追加
+                    if 'docId' not in df.columns:
+                        df['docId'] = doc_id
+                    if 'seqNumber' not in df.columns:
+                        df['seqNumber'] = seq_number
+                    if 'dateFile' not in df.columns:
+                        if 'submissionDate' not in df.columns and 'reportObligationDate' not in df.columns:
+                            df['dateFile'] = date_file
 
-                # 汎用保存関数を直接呼び出す
-                print(f"    -> Saving {data_type_name} data...")
-                database_manager.save_data(df, data_type_name)
+                    # 汎用保存関数を呼び出す
+                    database_manager.save_data(df, product_name)
+        finally:
+            # 4d. 処理済みのCSVファイルとフォルダを削除
+            if csv_path:
+                try:
+                    doc_folder_path = os.path.dirname(csv_path)
+                    if os.path.exists(doc_folder_path):
+                        shutil.rmtree(doc_folder_path)
+                        print(f"    Cleaned up temporary folder: {doc_folder_path}")
+                except Exception as e:
+                    print(f"    Warning: Failed to clean up temporary folder {doc_folder_path}: {e}")
 
-    print(f"\n--- Finished processing for formCode: {target_form_code} ---")
+    print(f"\n--- Finished processing for all specified data products. ---")
 
 if __name__ == "__main__":
-    # 処理対象の書類コードリスト
-    target_form_codes = [
-        # '030000',  # 有価証券報告書
-        '050210',  # 大量保有報告書
-        '050220',  # 大量保有報告書（変更報告書）
-        '170000',  # 自己株券買付状況報告書
-        '170001',  # 自己株券買付状況報告書（訂正）
-        '253000'   # 自己株券買付状況報告書（訂正，特定有価証券）
+    # 処理対象のデータプロダクトリスト
+    # 'MajorShareholders', 'ShareholderComposition', 'Officer', 'SpecifiedInvestment', 'VotingRights'
+    # 'LargeVolumeHoldingReport', 'BuybackStatusReport' から選択
+    TARGET_DATA_PRODUCTS = [
+        # 'MajorShareholders',
+        # 'ShareholderComposition',
+        # 'Officer',
+        # 'BuybackStatusReport'
+        'LargeVolumeHoldingReport'
     ]
 
-    for form_code in target_form_codes:
-        process_documents_by_form_code(form_code)
-    
-    print("\n--- All processing finished. ---")
+    process_documents(TARGET_DATA_PRODUCTS)
