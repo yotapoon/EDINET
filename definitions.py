@@ -2,9 +2,10 @@
 
 # 1. 書類種別の定義
 # 書類の大きなカテゴリと、それに該当する(form_code, ordinance_code)の組み合わせを定義
+# check_文書コードを使って確認する
 DOCUMENT_TYPE_DEFINITIONS = {
     'AnnualSecuritiesReport': [
-        ('030000', '010'), ('043000', '010') # 有価証券報告書, 訂正有価証券報告書
+        ('030000', '010'), ('030001', '010') # 有価証券報告書, 訂正有価証券報告書
     ],
     'LargeVolumeHoldingReport': [
         ('010002', '060'), ('030002', '060'), ('090001', '060'), 
@@ -30,3 +31,4 @@ DATA_PRODUCT_DEFINITIONS = {
     'LargeVolumeHoldingReport': 'LargeVolumeHoldingReport',
     'BuybackStatusReport':      'BuybackStatusReport',
 }
+

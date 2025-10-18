@@ -70,23 +70,36 @@ def process_documents(target_data_products: list[str]):
                 print(f"    No data extracted for docID: {doc_id}")
                 continue
 
-            # 4c. 抽出されたデータのうち、要求されたプロダクトのみをDBに保存
-            for product_name, df in extracted_data_map.items():
-                if product_name in target_data_products:
-                    if df.empty:
-                        continue
+            # 4c. 要求された各プロダクトについて、抽出結果を確認しDBに保存
+            for product_name in target_data_products:
+                # この書類が対象としているプロダクトか確認
+                doc_type_of_product = DATA_PRODUCT_DEFINITIONS.get(product_name)
+                current_doc_type = None
+                for dt, codes in DOCUMENT_TYPE_DEFINITIONS.items():
+                    if (form_code, ordinance_code) in codes:
+                        current_doc_type = dt
+                        break
+                
+                if doc_type_of_product != current_doc_type:
+                    continue # この書類は当該プロダクトの対象外
 
-                    # 共通のメタデータをDataFrameに追加
-                    if 'docId' not in df.columns:
-                        df['docId'] = doc_id
-                    if 'seqNumber' not in df.columns:
-                        df['seqNumber'] = seq_number
-                    if 'dateFile' not in df.columns:
-                        if 'submissionDate' not in df.columns and 'reportObligationDate' not in df.columns:
-                            df['dateFile'] = date_file
+                # データが抽出されたか確認
+                df = extracted_data_map.get(product_name)
+                if df is None or df.empty:
+                    print(f"    Info: No data found for '{product_name}' in docID: {doc_id}")
+                    continue
 
-                    # 汎用保存関数を呼び出す
-                    database_manager.save_data(df, product_name)
+                # 共通のメタデータをDataFrameに追加
+                if 'docId' not in df.columns:
+                    df['docId'] = doc_id
+                if 'seqNumber' not in df.columns:
+                    df['seqNumber'] = seq_number
+                if 'dateFile' not in df.columns:
+                    if 'SubmissionDate' not in df.columns and 'reportObligationDate' not in df.columns:
+                        df['dateFile'] = date_file
+
+                # 汎用保存関数を呼び出す
+                database_manager.save_data(df, product_name)
         finally:
             # 4d. 処理済みのCSVファイルとフォルダを削除
             if csv_path:
@@ -105,11 +118,13 @@ if __name__ == "__main__":
     # 'MajorShareholders', 'ShareholderComposition', 'Officer', 'SpecifiedInvestment', 'VotingRights'
     # 'LargeVolumeHoldingReport', 'BuybackStatusReport' から選択
     TARGET_DATA_PRODUCTS = [
-        # 'MajorShareholders',
-        # 'ShareholderComposition',
-        # 'Officer',
+        #'MajorShareholders',
+        #'ShareholderComposition',
+        #'Officer',
+        "SpecifiedInvestment",
+        "VotingRights",
         # 'BuybackStatusReport'
-        'LargeVolumeHoldingReport'
+        # 'LargeVolumeHoldingReport'
     ]
 
     process_documents(TARGET_DATA_PRODUCTS)

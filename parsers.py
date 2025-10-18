@@ -217,16 +217,26 @@ def extract_shareholder_data(df: pd.DataFrame) -> pd.DataFrame:
     member_contexts = df[df['コンテキストID'].astype(str).str.contains("MajorShareholdersMember")]["コンテキストID"].unique()
 
     for context in member_contexts:
-        ctx_df = df[df['コンテキストID'] == context] 
+        ctx_df = df[df['コンテキストID'] == context]
         
+        # shareholderIdをコンテキストから抽出
+        shareholder_id_match = re.search(r'No(\d+)MajorShareholdersMember', context)
+        shareholder_id = int(shareholder_id_match.group(1)) if shareholder_id_match else None
+
         name = ctx_df[ctx_df['要素ID'] == 'jpcrp_cor:NameMajorShareholders']['値'].iloc[0] if not ctx_df[ctx_df['要素ID'] == 'jpcrp_cor:NameMajorShareholders'].empty else None
         ratio = ctx_df[ctx_df['要素ID'] == 'jpcrp_cor:ShareholdingRatio']['値'].iloc[0] if not ctx_df[ctx_df['要素ID'] == 'jpcrp_cor:ShareholdingRatio'].empty else None
         num_shares = ctx_df[ctx_df['要素ID'] == 'jpcrp_cor:NumberOfSharesHeld']['値'].iloc[0] if not ctx_df[ctx_df['要素ID'] == 'jpcrp_cor:NumberOfSharesHeld'].empty else None
 
-        if name and ratio and num_shares:
+        # '－'をNoneに変換
+        if str(name).strip() == '－': name = None
+        if str(ratio).strip() == '－': ratio = None
+        if str(num_shares).strip() == '－': num_shares = None
+
+        if name and shareholder_id is not None:
             shareholder_data.append({
+                "shareholderId": shareholder_id,
                 "MajorShareholderName": name,
-                "VotingRightsRatio": float(ratio),
+                "VotingRightsRatio": ratio,
                 "NumberOfSharesHeld": num_shares
             })
 
@@ -234,8 +244,8 @@ def extract_shareholder_data(df: pd.DataFrame) -> pd.DataFrame:
     
     return _finalize_df(
         result_df, metadata,
-        ordered_columns=['SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode', 'MajorShareholderName', 'VotingRightsRatio', 'NumberOfSharesHeld'],
-        numeric_cols=['VotingRightsRatio', 'NumberOfSharesHeld']
+        ordered_columns=['SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode', 'shareholderId', 'MajorShareholderName', 'VotingRightsRatio', 'NumberOfSharesHeld'],
+        numeric_cols=['shareholderId', 'VotingRightsRatio', 'NumberOfSharesHeld']
     )
 
 # --- 株主構成パーサー ---
@@ -255,16 +265,25 @@ def extract_shareholder_composition_data(df: pd.DataFrame) -> pd.DataFrame:
         "Total": ("jpcrp_cor:NumberOfShareholdersTotal", None, "jpcrp_cor:NumberOfSharesHeldNumberOfUnitsTotal")
     }
 
+    def get_clean_value(element_id):
+        """要素IDから値を取得し、無効な値をNoneに変換する"""
+        if not element_id or df[df['要素ID'] == element_id].empty:
+            return None
+        value = df[df['要素ID'] == element_id]['値'].iloc[0]
+        if pd.isna(value) or str(value).strip() in ['－', '-']:
+            return None
+        return value
+
     composition_data = []
     for category_name, (num_tag, pct_tag, unit_tag) in categories.items():
-        num_shareholders = df[df['要素ID'] == num_tag]['値'].iloc[0] if not df[df['要素ID'] == num_tag].empty else None
-        pct_shareholdings = df[df['要素ID'] == pct_tag]['値'].iloc[0] if pct_tag and not df[df['要素ID'] == pct_tag].empty else None
-        num_units = df[df['要素ID'] == unit_tag]['値'].iloc[0] if not df[df['要素ID'] == unit_tag].empty else None
+        num_shareholders = get_clean_value(num_tag)
+        pct_shareholdings = get_clean_value(pct_tag)
+        num_units = get_clean_value(unit_tag)
         
         composition_data.append({
             "Category": category_name,
             "NumberOfShareholders": num_shareholders,
-            "PercentageOfShareholdings": float(pct_shareholdings) if pct_shareholdings else (1.0 if category_name == "Total" else None),
+            "PercentageOfShareholdings": pct_shareholdings if pct_shareholdings is not None else (1.0 if category_name == "Total" else None),
             "NumberOfSharesHeldUnits": num_units
         })
 
@@ -282,7 +301,7 @@ def parse_officer_information(df: pd.DataFrame) -> pd.DataFrame:
     """役員の状況に関するデータを解析し、整形されたDataFrameを返す。"""
     metadata = _extract_metadata(df)
     
-    officer_df = df[df['要素ID'].str.contains('(InformationAboutDirectorsAndCorporateAuditors|RemunerationEtcPaidByGroupToEachDirectorOrOtherOfficer)', na=False, regex=True)].copy()
+    officer_df = df[df['要素ID'].str.contains('(?:InformationAboutDirectorsAndCorporateAuditors|RemunerationEtcPaidByGroupToEachDirectorOrOtherOfficer)', na=False, regex=True)].copy()
     if officer_df.empty: return pd.DataFrame()
 
     officer_df['normalized_element_id'] = officer_df['要素ID'].str.replace('Proposal', '', regex=False)
@@ -299,18 +318,18 @@ def parse_officer_information(df: pd.DataFrame) -> pd.DataFrame:
     conditions = [officer_df['normalized_element_id'].str.contains(k) for k in item_type_map.keys()]
     officer_df['item_type'] = np.select(conditions, list(item_type_map.values()), default=None)
     officer_df['IsNewAppointment'] = officer_df['要素ID'].str.contains('Proposal', na=False)
-    officer_df['OfficerId'] = officer_df['コンテキストID'].str.extract(r'(jpcrp.*Member)')
-    officer_df.dropna(subset=['OfficerId', 'item_type'], inplace=True)
+    officer_df['officerId'] = officer_df['コンテキストID'].str.extract(r'(jpcrp.*Member)')
+    officer_df.dropna(subset=['officerId', 'item_type'], inplace=True)
 
     if officer_df.empty: return pd.DataFrame()
 
-    pivot_df = officer_df.pivot_table(index='OfficerId', columns='item_type', values='値', aggfunc='first')
-    new_appointment_flags = officer_df.groupby('OfficerId')['IsNewAppointment'].any()
-    pivot_df = pivot_df.merge(new_appointment_flags, on='OfficerId', how='left').reset_index()
+    pivot_df = officer_df.pivot_table(index='officerId', columns='item_type', values='値', aggfunc='first')
+    new_appointment_flags = officer_df.groupby('officerId')['IsNewAppointment'].any()
+    pivot_df = pivot_df.merge(new_appointment_flags, on='officerId', how='left').reset_index()
 
     return _finalize_df(
         pivot_df, metadata,
-        ordered_columns=['SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode', 'Name', 'IsNewAppointment', 'DateOfBirth', 'Title', 'NumberOfSharesHeld', 'TotalRemuneration', 'TermOfOffice', 'CareerSummary'],
+        ordered_columns=['SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode', 'officerId', 'Name', 'IsNewAppointment', 'DateOfBirth', 'Title', 'NumberOfSharesHeld', 'TotalRemuneration', 'TermOfOffice', 'CareerSummary'],
         numeric_cols=['NumberOfSharesHeld', 'TotalRemuneration'],
         date_cols=['DateOfBirth']
     )
@@ -340,14 +359,15 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
         return entity, item_type
 
     investment_df[['HoldingEntity', 'item_type']] = investment_df['要素ID'].apply(lambda x: pd.Series(get_entity_and_type(x)))
-    investment_df['row_id'] = investment_df['コンテキストID'].str.extract(r'_Row(\d+)')
-    investment_df.dropna(subset=['HoldingEntity', 'row_id', 'item_type'], inplace=True)
+    investment_df['rowId'] = investment_df['コンテキストID'].str.extract(r'_Row(\d+)')
+    investment_df.dropna(subset=['HoldingEntity', 'rowId', 'item_type'], inplace=True)
 
-    pivot_df = investment_df.pivot_table(index=['HoldingEntity', 'row_id'], columns=['item_type', '相対年度'], values='値', aggfunc='first')
+    pivot_df = investment_df.pivot_table(index=['HoldingEntity', 'rowId'], columns=['item_type', '相対年度'], values='値', aggfunc='first')
     pivot_df.columns = ['_'.join(filter(None, col)).strip() for col in pivot_df.columns.values]
     pivot_df.reset_index(inplace=True)
 
     column_mapping = {
+        'rowId': 'rowId', # 主キーのために追加
         'HoldingEntity': 'HoldingEntity', 'NameOfSecurities_当期末': 'NameOfSecurities',
         'NumberOfSharesHeld_当期末': 'NumberOfSharesHeldCurrentYear', 'BookValue_当期末': 'BookValueCurrentYear',
         'NumberOfSharesHeld_前期末': 'NumberOfSharesHeldPriorYear', 'BookValue_前期末': 'BookValuePriorYear',
@@ -358,8 +378,8 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
 
     return _finalize_df(
         result_df, metadata,
-        ordered_columns=['SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode', 'HoldingEntity', 'NameOfSecurities', 'NumberOfSharesHeldCurrentYear', 'BookValueCurrentYear', 'NumberOfSharesHeldPriorYear', 'BookValuePriorYear', 'HoldingPurpose', 'CrossShareholdingStatus'],
-        numeric_cols=['NumberOfSharesHeldCurrentYear', 'BookValueCurrentYear', 'NumberOfSharesHeldPriorYear', 'BookValuePriorYear']
+        ordered_columns=['SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode', 'HoldingEntity', 'rowId', 'NameOfSecurities', 'NumberOfSharesHeldCurrentYear', 'BookValueCurrentYear', 'NumberOfSharesHeldPriorYear', 'BookValuePriorYear', 'HoldingPurpose', 'CrossShareholdingStatus'],
+        numeric_cols=['rowId', 'NumberOfSharesHeldCurrentYear', 'BookValueCurrentYear', 'NumberOfSharesHeldPriorYear', 'BookValuePriorYear']
     )
 
 # --- 議決権パーサー ---
