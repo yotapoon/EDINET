@@ -280,7 +280,7 @@ def get_documents_by_form_code(target_form_code: str) -> list[tuple[str, str, st
         return []
 
 def save_data(df: pd.DataFrame, data_type_name: str):
-    """共通のデータ保存ロジック"""
+    """共通のデータ保存ロジック。冪等性を担保する。"""
     table_name = TABLE_NAME_MAP.get(data_type_name, data_type_name)
 
     if df.empty:
@@ -288,38 +288,102 @@ def save_data(df: pd.DataFrame, data_type_name: str):
         return
 
     try:
-        # docIDとdateFile/SubmissionDateの組み合わせで既存レコードを削除
-        # docIDは必ず存在すると仮定
-        # 日付カラムは 'dateFile' or 'SubmissionDate' or 'ReportObligationDate'
-        date_col = None
-        if 'dateFile' in df.columns:
-            date_col = 'dateFile'
-        elif 'SubmissionDate' in df.columns:
-            date_col = 'SubmissionDate'
-        elif 'ReportObligationDate' in df.columns:
-            date_col = 'ReportObligationDate'
+        with engine.begin() as connection: # トランザクションを開始
+            # テーブルの主キー情報を取得
+            primary_key_cols = [c.name for c in table(table_name).primary_key.columns]
 
-        # docIDと日付で既存データを削除し、冪等性を担保
-        if 'docID' in df.columns and date_col:
-            unique_docs = df[['docID', date_col]].drop_duplicates()
-            with engine.begin() as connection: # トランザクションを開始
-                for _, row in unique_docs.iterrows():
-                    doc_id = row['docID']
-                    date_val = row[date_col]
-                    # SQLインジェクション対策のため、テーブル名とカラム名は安全なもののみを許可
-                    if not re.match(r'^[a-zA-Z0-9_]+$', table_name) or not re.match(r'^[a-zA-Z0-9_]+$', date_col):
-                         raise ValueError("Invalid table or column name.")
+            if primary_key_cols and all(col in df.columns for col in primary_key_cols):
+                # 既存のレコードを主キーに基づいて削除
+                unique_keys = df[primary_key_cols].drop_duplicates()
+                for _, row in unique_keys.iterrows():
+                    conditions = [f'"{col}" = ?' for col in primary_key_cols]
+                    values = tuple(row[col] for col in primary_key_cols)
                     
-                    # テーブル名とカラム名を安全にクエリに組み込む
-                    delete_stmt = f'DELETE FROM "{table_name}" WHERE "docID" = ? AND "{date_col}" = ?'
-                    connection.execute(delete_stmt, (doc_id, date_val))
+                    delete_stmt = f'DELETE FROM "{table_name}" WHERE {" AND ".join(conditions)}'
+                    connection.execute(delete_stmt, values)
+            
+            # DataFrameをDBに書き込み
+            df.to_sql(table_name, con=connection, if_exists='append', index=False)
+            print(f"Success: Upserted {len(df)} records to {table_name}.")
 
-        df.to_sql(table_name, con=engine, if_exists='append', index=False)
-        print(f"Success: Uploaded {len(df)} records to {table_name}.")
-    except ValueError as ve:
-        print(f"Error during DB upload to {table_name}: {ve}")
     except Exception as e:
         print(f"Error: An unexpected error occurred during DB upload to {table_name}: {e}")
+
+
+def get_name_code_master_data() -> pd.DataFrame:
+    """
+    名寄せマスターの元データとなる、(filerName, edinetCode, secCode) のリストをDBから取得する。
+    edinetCodeがNULLでない、法人・団体の提出者のみを対象とする。
+    """
+    try:
+        with engine.connect() as connection:
+            submission_table = table(
+                SUBMISSION_TABLE_NAME,
+                column('filerName'),
+                column('edinetCode'),
+                column('secCode'),
+            )
+            
+            stmt = select(
+                submission_table.c.filerName,
+                submission_table.c.edinetCode,
+                submission_table.c.secCode,
+            ).where(
+                submission_table.c.edinetCode.is_not(None)
+            ).distinct()
+
+            df = pd.read_sql(stmt, connection)
+            print(f"Successfully fetched {len(df)} records for name master.")
+            return df
+    except Exception as e:
+        print(f"Error: Failed to retrieve name master data: {e}")
+        return pd.DataFrame()
+
+
+def get_data_for_enrichment(table_name: str, column_name: str) -> pd.DataFrame:
+    """
+    指定されたテーブルから、名寄せ対象となるカラムのデータを取得する。
+    """
+    try:
+        with engine.connect() as connection:
+            target_table = table(table_name)
+            stmt = select(target_table).distinct()
+            df = pd.read_sql(stmt, connection)
+            print(f"Successfully fetched {len(df)} records from {table_name} for enrichment.")
+            return df
+    except Exception as e:
+        print(f"Error: Failed to retrieve data from {table_name}: {e}")
+        return pd.DataFrame()
+
+def get_enriched_keys(table_name: str) -> set:
+    """
+    指定されたEnrichedテーブルから、既に処理済みのキーのセットを取得する。
+    """
+    keys = set()
+    try:
+        with engine.connect() as connection:
+            # テーブルが存在しない場合を考慮
+            if not engine.dialect.has_table(connection, table_name):
+                print(f"Info: Enriched table '{table_name}' does not exist yet. Returning empty set.")
+                return keys
+
+            enriched_table = table(table_name)
+            # 主キーのカラム名を取得 (仮定)
+            primary_key_cols = [c.name for c in enriched_table.primary_key.columns]
+            if not primary_key_cols:
+                print(f"Warning: No primary key found for {table_name}. Cannot check for existing records.")
+                return keys
+
+            stmt = select(*[column(c) for c in primary_key_cols])
+            df = pd.read_sql(stmt, connection)
+            
+            if not df.empty:
+                keys = set(df.itertuples(index=False, name=None))
+            print(f"Found {len(keys)} existing keys in {table_name}.")
+            return keys
+    except Exception as e:
+        print(f"Error: Failed to retrieve existing keys from {table_name}: {e}")
+        return keys
 
 
 if __name__ == "__main__":

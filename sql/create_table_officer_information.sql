@@ -17,3 +17,11 @@ CREATE TABLE EDINET.dbo.OfficerInformation(
     CareerSummary NVARCHAR(MAX),
     PRIMARY KEY (docId, seqNumber, officerId)
 );
+
+SELECT
+    *
+FROM
+    EDINET.dbo.OfficerInformation
+WHERE
+    SecuritiesCode = '86040'
+ORDER BY SubmissionDate desc, FiscalPeriodEnd desc;

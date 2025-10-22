@@ -15,3 +15,11 @@ CREATE TABLE EDINET.dbo.BuybackStatusReport(
 
 
 --SELECT * FROM EDINET.dbo.BuybackStatusReport ORDER BY dateFile desc
+
+SELECT
+    *
+FROM
+    EDINET.dbo.BuybackStatusReport
+WHERE
+    secCode = '80580'
+ORDER BY dateFile desc

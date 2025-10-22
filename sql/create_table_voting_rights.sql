@@ -12,3 +12,5 @@ CREATE TABLE EDINET.dbo.VotingRights(
     NumberOfSharesLessThanOneUnit DECIMAL(20, 0),
     PRIMARY KEY (docId, seqNumber)
 );
+
+--SELECT TOP 100 * FROM EDINET.dbo.VotingRights

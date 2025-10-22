@@ -12,3 +12,12 @@ CREATE TABLE EDINET.dbo.MajorShareholders(
     NumberOfSharesHeld DECIMAL(20, 0),
     PRIMARY KEY (docId, seqNumber, shareholderId)
 );
+
+
+SELECT
+    *
+FROM
+    EDINET.dbo.MajorShareholders
+WHERE
+    SecuritiesCode = '72030'
+ORDER BY SubmissionDate desc, FiscalPeriodEnd desc, shareholderId

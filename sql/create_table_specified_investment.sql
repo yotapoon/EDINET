@@ -17,3 +17,5 @@ CREATE TABLE EDINET.dbo.SpecifiedInvestment(
     CrossShareholdingStatus NVARCHAR(MAX),
     PRIMARY KEY (docId, seqNumber, HoldingEntity, rowId)
 );
+
+--SELECT * FROM EDINET.dbo.SpecifiedInvestment WHERE SecuritiesCode = '87250' ORDER BY SubmissionDate DESC, FiscalPeriodEnd DESC, HoldingEntity, ROWID 

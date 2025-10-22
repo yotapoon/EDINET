@@ -27,3 +27,13 @@ CREATE TABLE EDINET.dbo.LargeVolumeHoldingReport(
     totalAcquisitionFunds DECIMAL(20, 0),
     PRIMARY KEY (docId, member)
 );
+
+
+SELECT
+    *
+FROM
+    EDINET.dbo.LargeVolumeHoldingReport
+WHERE
+    submitterName LIKE N'%–ì‘º%'
+ORDER BY
+    dateFile DESC;
