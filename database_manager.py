@@ -1,6 +1,7 @@
 import re
 import pandas as pd
-from sqlalchemy import create_engine, select, table, column, desc
+import traceback
+from sqlalchemy import create_engine, select, table, column, desc, or_, and_, Table, MetaData
 from config import CONNECTION_STRING, SUBMISSION_TABLE_NAME
 
 # アプリケーション全体で共有するデータベースエンジンを作成
@@ -289,8 +290,9 @@ def save_data(df: pd.DataFrame, data_type_name: str):
 
     try:
         with engine.begin() as connection: # トランザクションを開始
-            # テーブルの主キー情報を取得
-            primary_key_cols = [c.name for c in table(table_name).primary_key.columns]
+            meta = MetaData()
+            tbl = Table(table_name, meta, autoload_with=connection)
+            primary_key_cols = [c.name for c in tbl.primary_key.columns]
 
             if primary_key_cols and all(col in df.columns for col in primary_key_cols):
                 # 既存のレコードを主キーに基づいて削除
@@ -308,6 +310,7 @@ def save_data(df: pd.DataFrame, data_type_name: str):
 
     except Exception as e:
         print(f"Error: An unexpected error occurred during DB upload to {table_name}: {e}")
+        traceback.print_exc()
 
 
 def get_name_code_master_data() -> pd.DataFrame:
@@ -342,13 +345,13 @@ def get_name_code_master_data() -> pd.DataFrame:
 
 def get_data_for_enrichment(table_name: str, column_name: str) -> pd.DataFrame:
     """
-    指定されたテーブルから、名寄せ対象となるカラムのデータを取得する。
+    指定されたテーブルから、名寄せ対象となるカラムを含む全てのデータを取得する。
     """
     try:
         with engine.connect() as connection:
-            target_table = table(table_name)
-            stmt = select(target_table).distinct()
-            df = pd.read_sql(stmt, connection)
+            # テーブル名を直接埋め込むことで、カラムを自動認識させる
+            query = f'SELECT * FROM "{table_name}"'
+            df = pd.read_sql(query, connection)
             print(f"Successfully fetched {len(df)} records from {table_name} for enrichment.")
             return df
     except Exception as e:
@@ -356,9 +359,7 @@ def get_data_for_enrichment(table_name: str, column_name: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 def get_enriched_keys(table_name: str) -> set:
-    """
-    指定されたEnrichedテーブルから、既に処理済みのキーのセットを取得する。
-    """
+    """指定されたEnrichedテーブルから、既に処理済みのキーのセットを取得する。"""
     keys = set()
     try:
         with engine.connect() as connection:
@@ -367,8 +368,8 @@ def get_enriched_keys(table_name: str) -> set:
                 print(f"Info: Enriched table '{table_name}' does not exist yet. Returning empty set.")
                 return keys
 
-            enriched_table = table(table_name)
-            # 主キーのカラム名を取得 (仮定)
+            meta = MetaData()
+            enriched_table = Table(table_name, meta, autoload_with=connection)
             primary_key_cols = [c.name for c in enriched_table.primary_key.columns]
             if not primary_key_cols:
                 print(f"Warning: No primary key found for {table_name}. Cannot check for existing records.")
