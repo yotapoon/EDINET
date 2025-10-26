@@ -1,89 +1,7 @@
 import re
 import pandas as pd
 import traceback
-from sqlalchemy import create_engine, select, table, column, desc, or_, and_, Table, MetaData
-from config import CONNECTION_STRING, SUBMISSION_TABLE_NAME
-
-# アプリケーション全体で共有するデータベースエンジンを作成
-engine = create_engine(CONNECTION_STRING)
-
-# データタイプ名をテーブル名にマッピングする。異なる場合のみ定義。
-TABLE_NAME_MAP = {
-    "Officer": "OfficerInformation"
-}
-
-def save_submission_list(df: pd.DataFrame, date_str: str):
-    """提出書類一覧のDataFrameをDBに保存する"""
-    if df.empty:
-        print(f"Info: No new records to upload for {date_str}.")
-        return
-
-    try:
-        df.to_sql(SUBMISSION_TABLE_NAME, con=engine, if_exists='append', index=False)
-        print(f"Success: Uploaded {len(df)} records for {date_str}.")
-    except Exception as e:
-        print(f"Error: An unexpected error occurred during DB upload for {date_str}: {e}")
-
-def get_existing_dates() -> list[str]:
-    """データベースに保存されている日付の一覧を取得する"""
-    try:
-        with engine.connect() as connection:
-            query = f"SELECT DISTINCT dateFile FROM {SUBMISSION_TABLE_NAME}"
-            df = pd.read_sql(query, connection)
-            # 日付オブジェクトを'YYYY-MM-DD'形式の文字列に変換
-            if not df.empty:
-                return pd.to_datetime(df['dateFile']).dt.strftime('%Y-%m-%d').tolist()
-            return []
-    except Exception as e:
-        print(f"Error: Failed to retrieve existing dates: {e}")
-        return []
-
-def get_documents_by_date(target_date: str) -> list[tuple[str, str, str]]:
-    """
-    指定された日付の書類の(docID, formCode, ordinanceCodeShort)のリストを取得する
-    """
-    try:
-        with engine.connect() as connection:
-            submission_table = table(
-                SUBMISSION_TABLE_NAME,
-                column('docID'),
-                column('formCode'),
-                column('ordinanceCode'),
-                column('dateFile'),
-                column('csvFlag'),
-            )
-            document_form_master_table = table(
-                'DocumentFormMaster',
-                column('formCode'),
-                column('ordinanceCode'),
-                column('ordinanceCodeShort'),
-            )
-
-            stmt = select(
-                submission_table.c.docID,
-                submission_table.c.formCode,
-                document_form_master_table.c.ordinanceCodeShort,
-            ).join(
-                document_form_master_table,
-                (submission_table.c.formCode == document_form_master_table.c.formCode) &
-                (submission_table.c.ordinanceCode == document_form_master_table.c.ordinanceCode)
-            ).where(
-                submission_table.c.dateFile == target_date
-            ).where(
-                submission_table.c.csvFlag == 1
-            )
-
-            df = pd.read_sql(stmt, connection)
-
-            if not df.empty:
-                # (docID, formCode, ordinanceCodeShort) のタプルのリストを返す
-                return list(df.itertuples(index=False, name=None))
-            return []
-    except Exception as e:
-        print(f"Error: Failed to retrieve documents for date {target_date}: {e}")
-        return []
-
-from sqlalchemy import create_engine, select, table, column, desc, or_, and_
+from sqlalchemy import create_engine, select, table, column, desc, or_, and_, Table, MetaData, text
 from config import CONNECTION_STRING, SUBMISSION_TABLE_NAME
 
 # アプリケーション全体で共有するデータベースエンジンを作成
@@ -290,21 +208,27 @@ def save_data(df: pd.DataFrame, data_type_name: str):
 
     try:
         with engine.begin() as connection: # トランザクションを開始
-            meta = MetaData()
-            tbl = Table(table_name, meta, autoload_with=connection)
-            primary_key_cols = [c.name for c in tbl.primary_key.columns]
+            # テーブルが存在する場合のみ、既存レコードの削除を試みる
+            if engine.dialect.has_table(connection, table_name):
+                meta = MetaData()
+                tbl = Table(table_name, meta, autoload_with=connection)
+                primary_key_cols = [c.name for c in tbl.primary_key.columns]
 
-            if primary_key_cols and all(col in df.columns for col in primary_key_cols):
-                # 既存のレコードを主キーに基づいて削除
-                unique_keys = df[primary_key_cols].drop_duplicates()
-                for _, row in unique_keys.iterrows():
-                    conditions = [f'"{col}" = ?' for col in primary_key_cols]
-                    values = tuple(row[col] for col in primary_key_cols)
+                if primary_key_cols and all(col in df.columns for col in primary_key_cols):
+                    # 既存のレコードを主キーに基づいて削除
+                    unique_keys = df[primary_key_cols].drop_duplicates()
                     
-                    delete_stmt = f'DELETE FROM "{table_name}" WHERE {" AND ".join(conditions)}'
-                    connection.execute(delete_stmt, values)
+                    # SQLAlchemyのtextと名前付きパラメータを使用して、より安全なDELETE文を構築
+                    conditions = [f'[{col}] = :{col}' for col in primary_key_cols]
+                    delete_stmt_str = f'DELETE FROM [{table_name}] WHERE {" AND ".join(conditions)}'
+                    delete_stmt = text(delete_stmt_str)
+
+                    # to_dict('records') を使って、行のリストを辞書のリストに変換し、一括で実行
+                    keys_to_delete = unique_keys.to_dict('records')
+                    if keys_to_delete:
+                        connection.execute(delete_stmt, keys_to_delete)
             
-            # DataFrameをDBに書き込み
+            # DataFrameをDBに書き込み (if_exists='append' なので、テーブルがなければ作成される)
             df.to_sql(table_name, con=connection, if_exists='append', index=False)
             print(f"Success: Upserted {len(df)} records to {table_name}.")
 

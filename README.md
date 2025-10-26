@@ -1,123 +1,131 @@
-# EDINET データ収集・分析ツール
+# EDINET データパイプライン
 
-このプロジェクトは、EDINET APIを利用して金融商品取引法に基づく開示書類の情報を収集し、XBRLデータから特定の財務・非財務情報を抽出してデータベースに保存するためのツールです。
+EDINET APIから開示情報を取得し、整形、名寄せ処理を行った上でデータベースに格納するためのデータパイプラインです。
 
 ## 主な機能
 
-- **提出書類一覧の取得**: 指定した期間の日々の提出書類メタデータをEDINET API v2から取得し、データベースに保存します。
-- **詳細情報の抽出**: 提出書類の中から対象の書類（有価証券報告書、大量保有報告書など）をダウンロードし、XBRLをCSV形式に変換して読み込みます。
-- **モジュール化されたデータ抽出**: `parsers.py` に含まれる情報タイプごとのパーサーを用いて、以下の情報を抽出・整形します。
-    - 大株主の状況
-    - 株主構成
-    - 役員の状況
-    - 政策保有株式
-    - 議決権の状況
-    - 大量保有報告書
-    - 自己株券買付状況報告書
-- **データベースへの保存**: 抽出・整形したデータをSQL Serverなどのデータベースに直接保存します。
+- **メタデータ収集**: 日々の提出書類メタデータをEDINET APIから取得し、ローカルDBに蓄積します。
+- **データ抽出**: 有価証券報告書や大量保有報告書など、XBRL形式で提供される書類から主要な財務・非財務情報を抽出・整形します。
+- **モジュール化されたパーサー**: `parsers.py`に必要な抽出ロジックを追加するだけで、新しいデータ項目（データプロダクト）に容易に対応できます。
+- **名称辞書の自動構築と名寄せ**: 提出者情報から名称のマスター辞書を自動で構築し、大株主名や投資先銘柄名の名寄せ（表記ゆれや常任代理人情報のクレンジング）を行います。
+- **ユーティリティスクリプト**: 特定の種類のサンプルデータを容易に取得するためのスクリプトを提供します。
 
-## ディレクトリ構成
+## ワークフロー概要
 
-```
-./
-├── collect_submission_data.py  # 日々の書類一覧を取得・DB保存するスクリプト
-├── process_documents.py        # データ種類に基づき、書類詳細を処理するメインスクリプト
-├── edinet_api.py               # EDINET APIとの通信を担当するモジュール
-├── database_manager.py         # データベース接続と操作を担当するモジュール
-├── document_processor.py       # 個別書類の読込とパーサー呼出を管理するモジュール
-├── parsers.py                  # 各種データ抽出ロジック（パーサー）を格納するモジュール
-├── config.py                   # APIキーやDB接続情報などの設定を管理するモジュール
-├── requirements.txt            # 依存ライブラリ一覧
-├── .env.example                # 環境変数ファイルの見本
-├── sql/                        # (オプション) テーブル作成などのSQLファイルを格納
-└── README.md                   # このファイル
-```
+このパイプラインは、大きく分けて3つのステップで構成されます。
+
+1.  **Step 1: 書類メタデータの収集**
+    - `collect_submission_data.py` を実行し、日々の提出書類の基本情報（書類ID, 提出者名, 書類種別など）をDBに保存します。
+
+2.  **Step 2: データ抽出**
+    - `process_documents.py` を実行し、指定したデータプロダクト（例: `MajorShareholders`）に必要な書類をDBから特定します。
+    - 対象書類をEDINET APIからダウンロードし、`parsers.py` 内の適切なパーサーを用いてデータを抽出、整形して各テーブルに保存します。
+
+3.  **Step 3: データの名寄せ**
+    - `enrich_data.py` を実行し、Step 2で抽出したデータ（例: 大株主の名称）に対して名寄せ処理を行います。
+    - 書類提出者の名称リストをマスターデータとして利用し、表記ゆれを吸収した上でEDINETコードや証券コードを付与します。結果は `Enriched...` という接頭辞のテーブルに保存されます。
 
 ## セットアップ
 
-### 1. リポジトリのクローン
-```bash
-git clone <repository_url>
-cd <project_directory>
-```
-
-### 2. 依存ライブラリのインストール
-`requirements.txt` を使用して、必要なライブラリをインストールします。
-
+### 1. 依存ライブラリのインストール
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. ODBCドライバのインストール
+### 2. ODBCドライバのインストール
 （SQL Serverを使用する場合）
 お使いのOSに合わせて、SQL Serverに接続するためのODBCドライバをインストールしてください。
 
-### 4. 環境変数の設定
-`.env.example` をコピーして `.env` ファイルを作成し、お使いの環境に合わせて内容を編集します。
+### 3. 環境変数の設定
+`.env.example` をコピーして `.env` ファイルを作成し、APIキーとDB情報を編集します。
 
 ```bash
 cp .env.example .env
 ```
 
-`.env` ファイルに必要な情報を記述します。
 ```dotenv
 # .env
-
-# EDINET API v2のサブスクリプションキー
 EDINET_API_KEY="YOUR_API_KEY"
-
-# データベース情報 (pyodbc用)
-# config.py の接続文字列に合わせて適宜変更してください
 SERVER_NAME="your_server_name"
 DATABASE_NAME="your_database_name"
 ```
 
+### 4. データベースの初期化
+`sql/` フォルダ内の `create_table_...` スクリプトを実行し、データ格納に必要なテーブルをDBに作成します。
+
 ## 使い方
 
-### Step 1: 提出書類一覧の取得
-
-`collect_submission_data.py` を実行して、指定した期間の書類メタデータをデータベースに保存します。スクリプト内の `start_date` と `end_date` を必要に応じて変更してください。
+### パイプラインの実行
 
 ```bash
+# Step 1: 最新の書類メタデータを取得
 python collect_submission_data.py
-```
-このステップは、データベースに最新の提出状況を反映させるために定期的に実行します。
 
-### Step 2: 書類詳細情報の抽出
+# Step 2: 指定したデータプロダクトを抽出し、DBに保存
+# (process_documents.py内のTARGET_DATA_PRODUCTSリストを編集)
+python process_documents.py
 
-`process_documents.py` を実行して、Step 1で保存したデータの中から目的の情報を抽出し、データベースに保存します。
-
-**このスクリプトは「データ種類」を起点に動作します。** どの情報を抽出したいかを、スクリプト末尾の `TARGET_DATA` リストで指定します。
-
-```python
-# process_documents.py の末尾
-
-if __name__ == "__main__":
-    # 処理対象のデータ種類リスト
-    # 'AnnualSecuritiesReport', 'LargeVolumeHoldingReport', 'BuybackStatusReport' から選択
-    TARGET_DATA = [
-        'AnnualSecuritiesReport',    # 有価証券報告書から株主構成、役員情報などを抽出
-        'LargeVolumeHoldingReport',  # 大量保有報告書
-        'BuybackStatusReport'      # 自己株券買付状況報告書
-    ]
-
-    process_documents(TARGET_DATA)
+# Step 3: 指定したターゲットの名寄せ処理を実行
+# (enrich_data.py内のENRICHMENT_TARGETSと実行モードを設定)
+python enrich_data.py
 ```
 
-`TARGET_DATA` リストを編集したら、スクリプトを実行します。
+### ユーティリティスクリプト
+
+#### サンプルCSVデータセットの取得
+
+`get_sample_document.py` を使うと、指定したデータプロダクトに関連する書類を最大100件まで取得し、生のCSVデータを結合して1つのファイルとして `samples/` ディレクトリに保存します。パーサーを新規開発する際のデータ分析に役立ちます。
 
 ```bash
-python process_documents.py
+# 「大株主」に関連する書類のデータセットを作成
+python get_sample_document.py MajorShareholders
+
+# 「株式公開買付」に関連する書類のデータセットを作成
+python get_sample_document.py TenderOffer
 ```
 
-スクリプトは、指定されたデータ種類に必要な書類（例：有価証券報告書）を自動的に特定し、ダウンロードと解析を効率的に行います。同じ書類が複数データ種類で必要な場合でも、ダウンロードは1回しか行われません。
+## プロジェクト構成
 
-## 各モジュールの役割
+```
+./
+├── .env.example
+├── README.md
+├── requirements.txt
+|
+├── collect_submission_data.py  # [Step 1] 書類メタデータ収集
+├── process_documents.py        # [Step 2] データ抽出処理の実行
+├── enrich_data.py              # [Step 3] 名寄せ処理の実行
+|
+├── config.py                   # 設定管理
+├── definitions.py              # データプロダクトと書類種別の定義
+├── database_manager.py         # DB操作
+├── edinet_api.py               # EDINET API通信
+├── document_processor.py       # 書類ダウンロードとパーサーの振り分け
+├── parsers.py                  # データ抽出ロジック
+├── matching.py                 # 名寄せロジック
+|
+├── get_sample_document.py      # [Util] サンプルデータ取得スクリプト
+├── analyze_enrichment_accuracy.py # [Util] 名寄せ精度分析スクリプト
+|
+└── sql/                        # テーブル作成用SQL
+```
 
-- **`collect_submission_data.py`**: EDINET APIから指定期間の提出書類メタデータを取得し、`submissions`テーブルに保存します。
-- **`process_documents.py`**: **（メイン実行ファイル）** `TARGET_DATA`で指定されたデータ種類に基づき、`database_manager`から処理対象の書類を特定し、`document_processor` を使って詳細情報を抽出・保存する司令塔です。
-- **`edinet_api.py`**: EDINET APIへのリクエスト（書類一覧取得、書類ダウンロード）を抽象化します。
-- **`database_manager.py`**: `SQLAlchemy` を用いてデータベースエンジンを管理し、データの読み書きを担います。`get_documents_by_codes`関数などで、効率的なデータ取得をサポートします。
-- **`config.py`**: `.env` ファイルから設定を読み込み、プロジェクト全体で利用できる定数として提供します。
-- **`document_processor.py`**: 書類IDを受け取り、書類のダウンロード、CSV変換を行います。`PARSER_REGISTRY`定義に基づき、書類のコードに応じて `parsers.py` 内の適切なパーサーを呼び出します。
-- **`parsers.py`**: XBRL(CSV)データから具体的な情報を抽出する関数群です。データ種類ごとに専用の抽出ロジックが実装されています。
+## 新しいデータ抽出処理の追加方法
+
+このプロジェクトは、新しい種類のデータ（データプロダクト）を簡単に追加できるように設計されています。株式公開買付（TenderOffer）を追加した際の手順は以下の通りです。
+
+1.  **`definitions.py` の更新**
+    - `DOCUMENT_TYPE_DEFINITIONS` に新しい書類種別（例: `TenderOfferDocuments`）と、それに対応する `(formCode, ordinanceCode)` のリストを追加します。
+    - `DATA_PRODUCT_DEFINITIONS` に新しいデータプロダクト名（例: `TenderOffer`）を追加し、先ほど定義した書類種別にマッピングします。
+
+2.  **DBテーブルの作成**
+    - `sql/` ディレクトリに、新しいデータを格納するための `create_table_... .sql` ファイルを作成します。
+
+3.  **`parsers.py` へのパーサー追加**
+    - `get_sample_document.py` を使ってサンプルCSVを取得し、データ構造（特に `要素ID`）を分析します。
+    - `parsers.py` に、新しいデータを抽出・整形するための関数（例: `parse_tender_offer`）を追加します。
+
+4.  **`document_processor.py` へのパーサー登録**
+    - `DOC_TYPE_PARSERS` 辞書に、新しい書類種別と、ステップ3で作成したパーサー関数を紐づけます。
+
+以上の手順で、パイプラインに新しいデータ抽出処理を組み込むことができます。

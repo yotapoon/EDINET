@@ -7,6 +7,7 @@ CREATE TABLE EDINET.dbo.SpecifiedInvestment(
     FiscalPeriodEnd DATE,
     SecuritiesCode CHAR(5),
     HoldingEntity NVARCHAR(255) NOT NULL,
+	HoldingEntityName NVARCHAR(MAX),
     rowId INT NOT NULL,
     NameOfSecurities NVARCHAR(MAX) NOT NULL,
     NumberOfSharesHeldCurrentYear DECIMAL(20, 0),

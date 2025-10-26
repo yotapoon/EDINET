@@ -343,6 +343,17 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
     investment_df = df[df['要素ID'].str.contains('SpecifiedInvestment', na=False)].copy()
     if investment_df.empty: return pd.DataFrame()
 
+    def _get_single_value(element_id: str) -> str | None:
+        """DataFrameから単一の要素IDの値を取得する。"""
+        series = df.loc[df['要素ID'] == element_id, '値']
+        if not series.empty:
+            val = series.iloc[0]
+            return val if pd.notna(val) and str(val).strip() not in ['－', '-'] else None
+        return None
+
+    largest_holder_name = _get_single_value('jpcrp_cor:NameOfGroupCompanyHoldingLargestAmountOfInvestmentSharesInGroup')
+    second_largest_holder_name = _get_single_value('jpcrp_cor:NameOfGroupCompanyHoldingSecondLargestAmountOfInvestmentSharesInGroup')
+
     def get_entity_and_type(item_name):
         if not isinstance(item_name, str): return None, None
         entity = 'ReportingCompany'
@@ -376,9 +387,20 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
     result_df = pd.DataFrame({new: pivot_df.get(original) for original, new in column_mapping.items()})
     result_df.dropna(subset=['NameOfSecurities'], inplace=True)
 
+    # HoldingEntityName を条件に応じて設定
+    conditions = [
+        result_df['HoldingEntity'] == 'LargestHoldingCompany',
+        result_df['HoldingEntity'] == 'SecondLargestHoldingCompany'
+    ]
+    choices = [
+        largest_holder_name,
+        second_largest_holder_name
+    ]
+    result_df['HoldingEntityName'] = np.select(conditions, choices, default=None)
+
     return _finalize_df(
         result_df, metadata,
-        ordered_columns=['SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode', 'HoldingEntity', 'rowId', 'NameOfSecurities', 'NumberOfSharesHeldCurrentYear', 'BookValueCurrentYear', 'NumberOfSharesHeldPriorYear', 'BookValuePriorYear', 'HoldingPurpose', 'CrossShareholdingStatus'],
+        ordered_columns=['SubmissionDate', 'FiscalPeriodEnd', 'SecuritiesCode', 'HoldingEntity', 'HoldingEntityName', 'rowId', 'NameOfSecurities', 'NumberOfSharesHeldCurrentYear', 'BookValueCurrentYear', 'NumberOfSharesHeldPriorYear', 'BookValuePriorYear', 'HoldingPurpose', 'CrossShareholdingStatus'],
         numeric_cols=['rowId', 'NumberOfSharesHeldCurrentYear', 'BookValueCurrentYear', 'NumberOfSharesHeldPriorYear', 'BookValuePriorYear']
     )
 

@@ -22,8 +22,13 @@ def _normalize_name(name: str) -> str:
     name = html.unescape(name)
     name = name.replace('－', '-')
 
+    # 新旧漢字・カナのバリエーションを吸収
+    name = name.replace('氣', '気')
+    name = name.replace('條', '条')
+    name = name.replace('ヱ', 'エ')
+
     # 1. 除外対象のキーワードをチェック
-    exclusion_keywords = ['持株会', '従業員持株会', '取引先持株会', '医療法人']
+    exclusion_keywords = ['持株会', '従業員持株会', '取引先持株会', '医療法人', '信託銀行']
     if any(keyword in name for keyword in exclusion_keywords):
         return ""
 
@@ -91,60 +96,125 @@ def create_name_code_master() -> pd.DataFrame:
 def match_names(names_to_match: pd.Series, master: pd.DataFrame, score_cutoff: int = 85) -> pd.DataFrame:
     """
     与えられた名称のリストをマスターと照合し、EDINETコードなどを返す (最終ハイブリッド戦略)。
-    最初にreindexによる完全一致を試み、失敗した場合にあいまい検索を行う。
+    1. 全ての名称を正規化する。
+    2. 正規化後の名称をキーとして手動マッピング辞書を適用し、処理対象の名称を決定する。
+    3. 処理対象の名称に対して、完全一致・あいまい検索の自動処理を適用する。
     """
-    print(f"Matching {len(names_to_match)} names using hybrid (reindex + fuzzy token_set_ratio) with cutoff {score_cutoff}...")
-    
-    # 1. マッチ対象の名称を正規化
-    normalized_names = names_to_match.apply(_normalize_name)
-    
-    # 2. reindexを使って高速な完全一致を実行
-    results_df = master.reindex(normalized_names)
+    print(f"--- Starting Hybrid Matching Process for {len(names_to_match)} total records ---")
+
+    # --- 1. 手動マッピング辞書の読み込み ---
+    try:
+        manual_map_df = pd.read_csv('mapping.csv', dtype=str)
+        # キーをnormalized_nameに変更
+        correction_dict = pd.Series(manual_map_df.correct_name.values, index=manual_map_df.normalized_name).to_dict()
+        print(f"Loaded {len(correction_dict)} entries from manual mapping file.")
+    except FileNotFoundError:
+        correction_dict = {}
+        print("Warning: mapping.csv not found. Proceeding without manual mapping.")
+
+    # --- 2. 名称の正規化と手動マッピングの適用 ---
+    # ユニークなオリジナル名で処理を進める
+    process_df = pd.DataFrame({'originalName': names_to_match.dropna().unique()})
+    # 全ての名称をまず正規化
+    process_df['normalizedName'] = process_df['originalName'].apply(_normalize_name)
+    # 正規化後の名称に手動マッピングを適用した結果を、そのままルックアップキーとして使用
+    process_df['lookupKey'] = process_df['normalizedName'].map(correction_dict).fillna(process_df['normalizedName'])
+
+    # --- 3. 自動マッチングの実行 ---
+    unique_lookup_keys = process_df['lookupKey'].unique()
+    print(f"Performing automatic matching for {len(unique_lookup_keys)} unique lookup keys...")
+
+    # 完全一致
+    results_df = master.reindex(unique_lookup_keys)
     results_df.rename(columns={'edinetCode': 'matchedEdinetCode', 'secCode': 'matchedSecCode'}, inplace=True)
-    results_df['originalName'] = names_to_match.values
+    results_df.index.name = 'lookupKey'
     results_df.reset_index(inplace=True)
 
-    # 3. 完全一致しなかったものを抽出
-    unmatched_df = results_df[results_df['matchedEdinetCode'].isnull()]
-    print(f"{len(unmatched_df)} names did not have an exact match. Applying fuzzy matching...")
-
-    if not unmatched_df.empty:
-        # あいまい検索用のマスターの名前リストを準備
-        master_choices = master.index.tolist()
+    # --- 3-2. 「ホールディングス」サフィックス検索 ---
+    # 完全一致でマッチしなかったもののうち、ホールディングス系の略称である可能性を考慮
+    unmatched_for_hd_check = results_df[results_df['matchedEdinetCode'].isnull()]
+    if not unmatched_for_hd_check.empty:
+        print(f"Performing Holdings suffix check for {len(unmatched_for_hd_check)} unmatched records...")
         
-        fuzzy_matches = {}
-        # tqdmを使って進捗を表示
-        for index, row in tqdm(unmatched_df.iterrows(), total=unmatched_df.shape[0], desc="Fuzzy Matching"):
-            normalized_name = row['index'] # reindexでindexになったnormalized_name
-            if not normalized_name:
+        master_keys = master.index
+        
+        # ホールディングスの派生パターンを定義
+        hd_suffixes = [
+            'ホールディングス',
+            'グループホールディングス',
+            'フィナンシャルホールディングス',
+            'グローバルホールディングス',
+            'hd',
+            'hds',
+            'ghd',
+            'fhd'
+        ]
+        
+        # 見つかったマッチを一時的に保存する辞書
+        hd_matches = {}
+
+        # マッチしなかったlookupKeyごとにループ
+        for index, row in unmatched_for_hd_check.iterrows():
+            lookup_key = row['lookupKey']
+            if not lookup_key or not isinstance(lookup_key, str):
                 continue
 
-            # あいまい検索を実行 (token_set_ratioを使用)
-            match = process.extractOne(
-                normalized_name, 
-                master_choices, 
-                scorer=fuzz.token_set_ratio, 
-                score_cutoff=score_cutoff
-            )
+            # 派生パターンを試す
+            potential_matches = []
+            for suffix in hd_suffixes:
+                potential_key = lookup_key + suffix
+                if potential_key in master_keys:
+                    potential_matches.append(potential_key)
             
-            if match:
-                # マッチしたnormalizedNameからマスターの情報を取得
-                matched_codes = master.loc[match[0]]
-                fuzzy_matches[index] = {
+            # ユニークなマッチが1件だけ見つかった場合のみ採用
+            if len(potential_matches) == 1:
+                matched_key = potential_matches[0]
+                matched_codes = master.loc[matched_key]
+                hd_matches[index] = {
                     'matchedEdinetCode': matched_codes['edinetCode'],
                     'matchedSecCode': matched_codes['secCode']
                 }
 
-        # あいまい検索の結果をresults_dfに反映
-        for index, match_data in fuzzy_matches.items():
-            results_df.loc[index, 'matchedEdinetCode'] = match_data['matchedEdinetCode']
-            results_df.loc[index, 'matchedSecCode'] = match_data['matchedSecCode']
+        # 見つかったマッチをresults_dfに反映
+        if hd_matches:
+            print(f"Found {len(hd_matches)} matches via Holdings suffix check.")
+            for idx, match_data in hd_matches.items():
+                results_df.loc[idx, ['matchedEdinetCode', 'matchedSecCode']] = match_data.values()
 
-    # 最終的な結果を整形
-    final_results = results_df[['originalName', 'matchedEdinetCode', 'matchedSecCode']]
+    # あいまい検索 (ホールディングス検索後)
+    unmatched_df = results_df[results_df['matchedEdinetCode'].isnull()] # 再度未マッチを取得
+    if not unmatched_df.empty:
+        print(f"{len(unmatched_df)} names still unmatched. Applying fuzzy matching...")
+        master_choices = master.index.tolist()
+        fuzzy_matches = {}
+        for index, row in tqdm(unmatched_df.iterrows(), total=unmatched_df.shape[0], desc="Fuzzy Matching"):
+            lookup_key = row['lookupKey']
+            if not lookup_key: continue
+            
+            best_candidate = process.extractOne(lookup_key, master_choices, scorer=fuzz.token_set_ratio)
+            if best_candidate and best_candidate[1] >= score_cutoff:
+                candidate_name = best_candidate[0]
+                matched_codes = master.loc[candidate_name]
+                fuzzy_matches[index] = {
+                    'matchedEdinetCode': matched_codes['edinetCode'],
+                    'matchedSecCode': matched_codes['secCode']
+                }
+        
+        for idx, match_data in fuzzy_matches.items():
+            results_df.loc[idx, ['matchedEdinetCode', 'matchedSecCode']] = match_data.values()
 
-    # マッチした件数を報告
-    matched_count = final_results['matchedEdinetCode'].notna().sum()
-    print(f"Finished matching names. {matched_count} of {len(names_to_match)} names were matched.")
+    # --- 4. 結果の結合 ---
+    # process_df (originalName <-> lookupKey) に自動マッチング結果を結合
+    final_process_df = pd.merge(process_df, results_df[['lookupKey', 'matchedEdinetCode', 'matchedSecCode']], on='lookupKey', how='left')
+
+    print("--- Debug: final_process_df for '㈱高島屋' ---")
+    print(final_process_df[final_process_df['originalName'] == '㈱高島屋'])
+    print("-------------------------------------------------")
+
+    # 最終的に、元の（重複ありの）リストに結果をマージして返す
+    final_df = pd.merge(names_to_match.to_frame('originalName'), final_process_df, on='originalName', how='left')
+
+    matched_count = final_df['matchedEdinetCode'].notna().sum()
+    print(f"--- Finished Matching. Total matched: {matched_count} of {len(names_to_match)} records. ---")
     
-    return final_results
+    return final_df[['originalName', 'matchedEdinetCode', 'matchedSecCode']]

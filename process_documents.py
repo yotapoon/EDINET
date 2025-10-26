@@ -122,7 +122,7 @@ if __name__ == "__main__":
         #'ShareholderComposition',
         #'Officer',
         "SpecifiedInvestment",
-        "VotingRights",
+        # "VotingRights",
         # 'BuybackStatusReport'
         # 'LargeVolumeHoldingReport'
     ]

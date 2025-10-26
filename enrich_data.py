@@ -22,15 +22,24 @@ ENRICHMENT_TARGETS = {
     },
 }
 
-def enrich_data(target_name: str):
-    """指定されたターゲットの名寄せ処理を実行する汎用関数"""
-    print(f"\n--- Starting enrichment for {target_name} ---")
+def enrich_data(target_name: str, test_mode: bool = False):
+    """
+    指定されたターゲットの名寄せ処理を実行する汎用関数
+
+    Args:
+        target_name (str): ENRICHMENT_TARGETSで定義されたターゲット名
+        test_mode (bool): Trueの場合、DB保存せず結果のDataFrameを返す
+    
+    Returns:
+        pd.DataFrame or None: test_modeがTrueの場合、名寄せ結果のDataFrameを返す
+    """
+    print(f"\n--- Starting enrichment for {target_name} (Test Mode: {test_mode}) ---")
     
     # 0. 設定を取得
     config = ENRICHMENT_TARGETS.get(target_name)
     if not config:
         print(f"Error: Target '{target_name}' not found in ENRICHMENT_TARGETS.")
-        return
+        return None
 
     source_table = config["source_table"]
     enriched_table = config["enriched_table"]
@@ -41,13 +50,13 @@ def enrich_data(target_name: str):
     master_df = matching.create_name_code_master()
     if master_df.empty:
         print("Error: Name master is empty. Aborting.")
-        return
+        return None
 
     # 2. 名寄せ対象の元データを取得
     source_df = database_manager.get_data_for_enrichment(source_table, name_column)
     if source_df.empty:
         print(f"Info: No data found in {source_table} to enrich.")
-        return
+        return None
 
     # 3. 処理済みのキーを取得して、未処理のデータに絞り込む
     processed_keys = database_manager.get_enriched_keys(enriched_table)
@@ -60,7 +69,8 @@ def enrich_data(target_name: str):
 
     if unprocessed_df.empty:
         print("Info: All records are already enriched. Nothing to do.")
-        return
+        # test_modeでも空のDataFrameを返す
+        return unprocessed_df if test_mode else None
     
     print(f"Found {len(unprocessed_df)} new records to process.")
 
@@ -74,15 +84,63 @@ def enrich_data(target_name: str):
     enriched_df = pd.merge(unprocessed_df, matched_results, on=name_column, how='left')
     enriched_df['matchMethod'] = 'exact' # 今回は完全一致のみ
 
-    # 6. 結果を新しいテーブルに保存
-    database_manager.save_data(enriched_df, enriched_table)
-
-    print(f"--- Finished enrichment for {target_name} ---")
+    # 6. 結果を評価または保存
+    if test_mode:
+        # テストモード時はDataFrameを返す
+        return enriched_df
+    else:
+        # 通常モード時は結果を新しいテーブルに保存
+        database_manager.save_data(enriched_df, enriched_table)
+        print(f"--- Finished enrichment for {target_name} ---")
+        return None
 
 
 if __name__ == "__main__":
-    # 設定（ENRICHMENT_TARGETS）に定義されているキーを指定して実行
-    targets_to_run = ["MajorShareholders", "SpecifiedInvestment"]
-    
-    for target in targets_to_run:
-        enrich_data(target)
+    # --- モード設定 ---
+    # Trueにすると、DBに保存せず、名寄せ結果のプレビューと統計情報を表示します
+    TEST_MODE = True
+    TARGET_NAME = "MajorShareholders" # テスト対象
+
+    if not TEST_MODE:
+        # 通常実行：ENRICHMENT_TARGETSに定義されているすべてのターゲットを処理
+        print("--- Running in Normal Mode ---")
+        for target in ENRICHMENT_TARGETS.keys():
+            enrich_data(target, test_mode=False)
+    else:
+        # テスト実行
+        print(f"--- Running in Test Mode for: {TARGET_NAME} ---")
+        
+        # 1. テストモードで名寄せ処理を実行
+        results_df = enrich_data(TARGET_NAME, test_mode=True)
+
+        if results_df is not None and not results_df.empty:
+            # 2. 結果の統計情報を計算 (正しい列名を使用)
+            total_records = len(results_df)
+            matched_records = results_df['matchedEdinetCode'].notna().sum()
+            unmatched_records = total_records - matched_records
+            config = ENRICHMENT_TARGETS[TARGET_NAME]
+            name_col = config['name_column']
+
+            print("\n--- Enrichment Test Results ---")
+            print(f"Total Records Processed: {total_records}")
+            print(f"Successfully Matched:    {matched_records}")
+            print(f"Unmatched:               {unmatched_records}")
+            print("---------------------------------")
+
+            # 3. マッチした結果のサンプルを表示 (正しい列名を使用)
+            if matched_records > 0:
+                print("\n[Sample of Matched Records]")
+                matched_sample = results_df[results_df['matchedEdinetCode'].notna()].head()
+                print(matched_sample[[name_col, 'matchedEdinetCode', 'matchedSecCode']])
+            
+            # 4. マッチしなかった結果を件数順に上位20件表示 (正しい列名を使用)
+            if unmatched_records > 0:
+                print("\n[Top 20 Unmatched Records by Frequency]")
+                unmatched_counts = results_df[results_df['matchedEdinetCode'].isna()][name_col].value_counts()
+                print(unmatched_counts.head(50))
+
+            print("\n--- Test Finished ---")
+        elif results_df is not None:
+            print("\n--- No new records to process. Test finished. ---")
+        else:
+            print("\n--- Test failed or was aborted. ---")
