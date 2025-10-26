@@ -3,19 +3,19 @@
     "**/ref": true,
     "**/data/**": true,
     "**/old/**": true,
-    // "**/check/**": true
+     "**/check/**": true
   },
   "search.exclude": {
     "**/ref": true,
     "**/data/**": true,
     "**/old/**": true,
-    // "**/check/**": true
+     "**/check/**": true
   },
   "files.watcherExclude": {
     "**/ref/**": true,
     "**/data/**": true,
     "**/old/**": true,
-    // "**/check/**": true
+     "**/check/**": true
   },
   "terminal.integrated.wordWrap": false
 }
