@@ -344,16 +344,21 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
     investment_df = df[df['要素ID'].str.contains('SpecifiedInvestment', na=False)].copy()
     if investment_df.empty: return pd.DataFrame()
 
-    def _get_single_value(element_id: str) -> str | None:
+    def _get_single_value(df, element_id: str) -> str | None:
         """DataFrameから単一の要素IDの値を取得する。"""
-        series = original_df.loc[original_df['要素ID'] == element_id, '値']
+        series = df.loc[df['要素ID'] == element_id, '値']
         if not series.empty:
             val = series.iloc[0]
             return val if pd.notna(val) and str(val).strip() not in ['－', '-'] else None
         return None
 
-    largest_holder_name = _get_single_value(df, 'jpcrp_cor:NameOfGroupCompanyHoldingLargestAmountOfInvestmentSharesInGroup')
-    second_largest_holder_name = _get_single_value(df, 'jpcrp_cor:NameOfGroupCompanyHoldingSecondLargestAmountOfInvestmentSharesInGroup')
+    largest_holder_name = _get_single_value(original_df, 'jpcrp_cor:NameOfGroupCompanyHoldingLargestAmountOfInvestmentSharesInGroup')
+    second_largest_holder_name = _get_single_value(original_df, 'jpcrp_cor:NameOfGroupCompanyHoldingSecondLargestAmountOfInvestmentSharesInGroup')
+    
+    print(f"largest_holder_name: {largest_holder_name}")
+    print(f"second_largest_holder_name: {second_largest_holder_name}")
+    print("investment_df:")
+    print(investment_df.to_string())
 
     def get_entity_and_type(item_name):
         if not isinstance(item_name, str): return None, None
@@ -378,6 +383,9 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
     pivot_df.columns = ['_'.join(filter(None, col)).strip() for col in pivot_df.columns.values]
     pivot_df.reset_index(inplace=True)
 
+    print("pivot_df:")
+    print(pivot_df.to_string())
+
     column_mapping = {
         'rowId': 'rowId', # 主キーのために追加
         'HoldingEntity': 'HoldingEntity', 'NameOfSecurities_当期末': 'NameOfSecurities',
@@ -387,6 +395,9 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
     }
     result_df = pd.DataFrame({new: pivot_df.get(original) for original, new in column_mapping.items()})
     result_df.dropna(subset=['NameOfSecurities'], inplace=True)
+
+    print("result_df before name assignment:")
+    print(result_df.to_string())
 
     # HoldingEntityName を条件に応じて設定
     conditions = [

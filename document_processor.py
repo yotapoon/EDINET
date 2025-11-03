@@ -154,8 +154,8 @@ if __name__ == "__main__":
     pd.set_option('display.max_rows', 100)
 
     # --- ここを編集して、テストしたい書類の情報を指定してください ---
-    doc_id = "S1007TAK"  # 例: MS&AD
     doc_id = "S100TSLZ" # カクヤス
+    # doc_id = "S1007TAK"  # 例: MS&AD
     # doc_id = "S100TRUQ" # アルフレッサ
     
     target_data_type = "SpecifiedInvestment" # ★解析したいデータタイプを指定
