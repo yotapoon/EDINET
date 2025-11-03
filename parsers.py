@@ -338,6 +338,7 @@ def parse_officer_information(df: pd.DataFrame) -> pd.DataFrame:
 
 def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
     """特定投資有価証券のデータを解析し、整形されたDataFrameを返す。"""
+    original_df = df.copy()
     metadata = _extract_metadata(df)
     
     investment_df = df[df['要素ID'].str.contains('SpecifiedInvestment', na=False)].copy()
@@ -345,14 +346,14 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
 
     def _get_single_value(element_id: str) -> str | None:
         """DataFrameから単一の要素IDの値を取得する。"""
-        series = df.loc[df['要素ID'] == element_id, '値']
+        series = original_df.loc[original_df['要素ID'] == element_id, '値']
         if not series.empty:
             val = series.iloc[0]
             return val if pd.notna(val) and str(val).strip() not in ['－', '-'] else None
         return None
 
-    largest_holder_name = _get_single_value('jpcrp_cor:NameOfGroupCompanyHoldingLargestAmountOfInvestmentSharesInGroup')
-    second_largest_holder_name = _get_single_value('jpcrp_cor:NameOfGroupCompanyHoldingSecondLargestAmountOfInvestmentSharesInGroup')
+    largest_holder_name = _get_single_value(df, 'jpcrp_cor:NameOfGroupCompanyHoldingLargestAmountOfInvestmentSharesInGroup')
+    second_largest_holder_name = _get_single_value(df, 'jpcrp_cor:NameOfGroupCompanyHoldingSecondLargestAmountOfInvestmentSharesInGroup')
 
     def get_entity_and_type(item_name):
         if not isinstance(item_name, str): return None, None
@@ -372,7 +373,7 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
     investment_df[['HoldingEntity', 'item_type']] = investment_df['要素ID'].apply(lambda x: pd.Series(get_entity_and_type(x)))
     investment_df['rowId'] = investment_df['コンテキストID'].str.extract(r'_Row(\d+)')
     investment_df.dropna(subset=['HoldingEntity', 'rowId', 'item_type'], inplace=True)
-
+    
     pivot_df = investment_df.pivot_table(index=['HoldingEntity', 'rowId'], columns=['item_type', '相対年度'], values='値', aggfunc='first')
     pivot_df.columns = ['_'.join(filter(None, col)).strip() for col in pivot_df.columns.values]
     pivot_df.reset_index(inplace=True)

@@ -144,19 +144,73 @@ def parse_document_file(csv_path: str, form_code: str, ordinance_code: str, ordi
 
 
 if __name__ == "__main__":
-    # doc_id, form_code = "S100W9ZC", "053000"
-    # doc_id, form_code = "S100W9YI", "030000"
-    # doc_id, form_code = "S100W9Y3", "030000"
-    doc_id, form_code = "S100W0ZR", "030000" # MS&AD
+    import shutil
+    import os
+    import database_manager
 
-    # doc_id, form_code = "S100VWVY", "030000" # トヨタ自動車
-    # doc_id, form_code = "S100WKUZ", "010000" #
-    # doc_id, form_code, ordinanceCodeShort = "S100WPGX", "170000", "crp" # 網屋の自己株
-    # curl "https://disclosure.edinet-fsa.go.jp/api/v2/documents/S100WKUZ?type=5&Subscription-Key=YOUR_API_KEY" -o S100WKUZ.zip
+    # pandasの表示オプションを設定
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', 200)
+    pd.set_option('display.max_rows', 100)
 
+    # --- ここを編集して、テストしたい書類の情報を指定してください ---
+    doc_id = "S1007TAK"  # 例: MS&AD
+    doc_id = "S100TSLZ" # カクヤス
+    # doc_id = "S100TRUQ" # アルフレッサ
     
-    
-    csv_path = fetch_and_save_document(doc_id, ordinanceCodeShort)
-    if csv_path:
-        print(parse_document_file(csv_path, form_code = form_code)[ "BuybackStatusReport"])
-        parse_document_file(csv_path, form_code = form_code)[ "BuybackStatusReport"].to_clipboard()
+    target_data_type = "SpecifiedInvestment" # ★解析したいデータタイプを指定
+    # ---------------------------------------------------------
+
+    print(f"--- Start processing for docID: {doc_id} ---")
+
+    # 1. doc_idから書類情報をDBより取得
+    doc_details = database_manager.get_document_details_by_id(doc_id)
+    if not doc_details:
+        print(f"Error: Document details not found in the database for docID: {doc_id}")
+    else:
+        form_code, ordinance_code, ordinance_code_short = doc_details
+        print(f"Found document details: form_code={form_code}, ordinance_code={ordinance_code}, short={ordinance_code_short}")
+
+        # 2. 書類をダウンロードしてCSVファイルのパスを取得
+        csv_path = fetch_and_save_document(doc_id, ordinance_code_short)
+
+        if not csv_path:
+            print(f"Failed to download or save document for docID: {doc_id}")
+        else:
+            print(f"Document saved to: {csv_path}")
+
+            # 3. CSVファイルをパース
+            extracted_data_map = parse_document_file(
+                csv_path,
+                form_code=form_code,
+                ordinance_code=ordinance_code,
+                ordinance_code_short=ordinance_code_short
+            )
+
+            # 4. 指定されたデータタイプの結果を取得してクリップボードにコピー
+            result_df = extracted_data_map.get(target_data_type)
+
+            if result_df is not None and not result_df.empty:
+                try:
+                    result_df.to_clipboard(index=False, excel=True)
+                    print(f"\n--- Success! ---")
+                    print(f"Copied the '{target_data_type}' data ({len(result_df)} rows) to the clipboard.")
+                    print("\n--- Data Preview (first 5 rows) ---")
+                    print(result_df.head().to_string())
+                except Exception as e:
+                    print(f"\n--- Error ---")
+                    print(f"Failed to copy data to clipboard: {e}")
+            else:
+                print(f"\n--- Data Not Found ---")
+                print(f"Could not find or extract data for '{target_data_type}'.")
+                if extracted_data_map:
+                    print(f"Available data types in this document are: {list(extracted_data_map.keys())}")
+
+            # 5. ダウンロードした一時ファイルをクリーンアップ
+            try:
+                doc_folder_path = os.path.dirname(csv_path)
+                if os.path.exists(doc_folder_path):
+                    shutil.rmtree(doc_folder_path)
+                    print(f"\n--- Cleaned up temporary folder: {doc_folder_path} ---")
+            except Exception as e:
+                print(f"\nWarning: Failed to clean up temporary folder {os.path.dirname(csv_path)}: {e}")

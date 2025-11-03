@@ -51,3 +51,8 @@ where 1 = 1
 	--AND docID = 'S100W9YI'
 ORDER BY dateFile DESC
 
+SELECT *
+FROM EDINET..DocumentMetadata AS SUBMISSION
+WHERE 1 = 1
+	AND SUBMISSION.filerName LIKE N'%MS&AD%' AND SUBMISSION.formCode = '030000' -- MS&AD‚Ì—L•ñ
+ORDER BY dateFile DESC

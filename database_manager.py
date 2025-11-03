@@ -310,6 +310,50 @@ def get_enriched_keys(table_name: str) -> set:
         print(f"Error: Failed to retrieve existing keys from {table_name}: {e}")
         return keys
 
+def get_document_details_by_id(doc_id: str) -> tuple | None:
+    """
+    doc_idに一致する書類の詳細情報をデータベースから取得する。
+
+    Args:
+        doc_id (str): 取得したい書類のdocId。
+
+    Returns:
+        tuple | None: (form_code, ordinance_code, ordinance_code_short) のタプル、見つからない場合はNone。
+    """
+    try:
+        with engine.connect() as connection:
+            submission_table = table(
+                SUBMISSION_TABLE_NAME,
+                column('docID'),
+                column('formCode'),
+                column('ordinanceCode'),
+            )
+            document_form_master_table = table(
+                'DocumentFormMaster',
+                column('formCode'),
+                column('ordinanceCode'),
+                column('ordinanceCodeShort'),
+            )
+
+            stmt = select(
+                submission_table.c.formCode,
+                submission_table.c.ordinanceCode,
+                document_form_master_table.c.ordinanceCodeShort,
+            ).join(
+                document_form_master_table,
+                (submission_table.c.formCode == document_form_master_table.c.formCode) &
+                (submission_table.c.ordinanceCode == document_form_master_table.c.ordinanceCode)
+            ).where(
+                submission_table.c.docID == doc_id
+            )
+
+            result = connection.execute(stmt).fetchone()
+            return result if result else None
+
+    except Exception as e:
+        print(f"Error: Failed to retrieve document details for docID {doc_id}: {e}")
+        return None
+
 
 if __name__ == "__main__":
     # get_documents_by_date のテスト
