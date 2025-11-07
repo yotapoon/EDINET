@@ -98,13 +98,14 @@ def enrich_data(target_name: str, test_mode: bool = False):
 if __name__ == "__main__":
     # --- モード設定 ---
     # Trueにすると、DBに保存せず、名寄せ結果のプレビューと統計情報を表示します
-    TEST_MODE = True
-    TARGET_NAME = "MajorShareholders" # テスト対象
+    TEST_MODE = False
+    TARGET_NAME = "SpecifiedInvestment" # テスト対象
 
     if not TEST_MODE:
-        # 通常実行：ENRICHMENT_TARGETSに定義されているすべてのターゲットを処理
-        print("--- Running in Normal Mode ---")
-        for target in ENRICHMENT_TARGETS.keys():
+        # 通常実行：指定されたターゲットのみを処理
+        TARGET_DATA_PRODUCTS = ["SpecifiedInvestment"]
+        print(f"--- Running in Normal Mode for: {', '.join(TARGET_DATA_PRODUCTS)} ---")
+        for target in TARGET_DATA_PRODUCTS:
             enrich_data(target, test_mode=False)
     else:
         # テスト実行

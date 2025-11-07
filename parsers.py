@@ -352,11 +352,19 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
             return val if pd.notna(val) and str(val).strip() not in ['－', '-'] else None
         return None
 
-    largest_holder_name = _get_single_value(original_df, 'jpcrp_cor:NameOfGroupCompanyHoldingLargestAmountOfInvestmentSharesInGroup')
-    second_largest_holder_name = _get_single_value(original_df, 'jpcrp_cor:NameOfGroupCompanyHoldingSecondLargestAmountOfInvestmentSharesInGroup')
+
+    shareholdings_text = _get_single_value(original_df, 'jpcrp_cor:ShareholdingsTextBlock')
+    largest_holder_name = None
+    if shareholdings_text:
+        match = re.search(r'（最大保有会社）である(.+?)については', shareholdings_text)
+        if match:
+            largest_holder_name = match.group(1)
+
+    second_largest_holder_name = None # Placeholder for now, as the text block only mentions the largest.
     
     print(f"largest_holder_name: {largest_holder_name}")
     print(f"second_largest_holder_name: {second_largest_holder_name}")
+
     print("investment_df:")
     print(investment_df.to_string())
 
@@ -408,7 +416,7 @@ def parse_specified_investment(df: pd.DataFrame) -> pd.DataFrame:
         largest_holder_name,
         second_largest_holder_name
     ]
-    result_df['HoldingEntityName'] = np.select(conditions, choices, default=None)
+    result_df['HoldingEntityName'] = np.select(conditions, choices, default=_get_single_value(original_df, 'jpcrp_cor:FilerNameInJapaneseCoverPage'))
 
     return _finalize_df(
         result_df, metadata,

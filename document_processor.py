@@ -210,7 +210,7 @@ if __name__ == "__main__":
             try:
                 doc_folder_path = os.path.dirname(csv_path)
                 if os.path.exists(doc_folder_path):
-                    shutil.rmtree(doc_folder_path)
+                    # shutil.rmtree(doc_folder_path)
                     print(f"\n--- Cleaned up temporary folder: {doc_folder_path} ---")
             except Exception as e:
                 print(f"\nWarning: Failed to clean up temporary folder {os.path.dirname(csv_path)}: {e}")
