@@ -23,3 +23,5 @@ CREATE TABLE EnrichedSpecifiedInvestment (
     -- 主キー
     PRIMARY KEY (SubmissionDate, SecuritiesCode, HoldingEntity, rowId)
 );
+
+--select * from EDINET..EnrichedSpecifiedInvestment
