@@ -121,10 +121,10 @@ if __name__ == "__main__":
         #'MajorShareholders',
         #'ShareholderComposition',
         #'Officer',
-        "SpecifiedInvestment",
+        #"SpecifiedInvestment",
         # "VotingRights",
-        # 'BuybackStatusReport'
-        # 'LargeVolumeHoldingReport'
+        'BuybackStatusReport',
+        'LargeVolumeHoldingReport'
     ]
 
     process_documents(TARGET_DATA_PRODUCTS)
